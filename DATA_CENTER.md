@@ -142,3 +142,7 @@ exit
 ## 開機自動恢復（選用）
 
 資料中心 #0、核電廠 #3、基地 #4 可使用更新後的 `ty.lua boot on` 各自啟用開機服務。此指令不會在安裝當下中斷現有監控，也不會啟動或停止核分裂反應爐。#3、#4 的代理需支援新的持久化設定；安裝器會明確提示是否只更新代理程式的磁碟檔案。舊代理的目前執行實例不會被即時替換，要待下次重開機才能開始保留 `start`／`stop` 的意圖。首次仍需要在各台電腦本機啟用一次，不能透過尚未安裝此功能的舊代理遠端寫入開機腳本。完整指令與安全限制見 [INSTALLER.md](INSTALLER.md#開機自動恢復opt-in不會自動啟動反應爐)。
+
+## 完整遠端 CraftOS Shell（新增、須本機授權）
+
+此功能與原有 `nodes/info/update/start/stop/restart` 管理協定並行，不取代 `dc_agent.lua`。Private-world Remote Shell 已加入 `dc_shell_host.lua`、`dc_shell_client.lua`，由新版 `dc_center.lua` 轉送 Pocket #6 的遠端工作階段。先更新資料中心 #0，再由 Pocket #6 使用 `shell 4` 連線基地 #4；首次在基地 #4 必須於本機執行 `dc_shell_host.lua enable`，不能靠舊代理憑空遠端安裝。核電廠 #3 運轉期間不開放完整 Shell。`ty.lua install` 只安裝檔案，不會自動開放完整 Shell 權限。**Rednet 缺乏加密身分驗證；僅供完全可信任的私人伺服器使用。** 詳見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
