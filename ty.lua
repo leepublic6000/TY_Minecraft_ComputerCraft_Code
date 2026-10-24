@@ -315,6 +315,205 @@ local function fleet()
     say("#3 (plant) unchanged; use existing manual centre commands after safety checks.")
     return ok
 end
+-- TY-managed startup is a separate /startup entry. Never overwrite startup.lua.
+local BOOT_MARK = "-- TY_BOOT_MANAGED_V1"
+local BOOT_HOOK = "startup/ty_managed.lua"
+local BOOT_DESIRED = "ty_boot_service.flag"
+local AGENT_MARK = "-- TY_BOOT_RESUME_V1"
+local BOOT_PROGRAMS = { [0] = "dc_center.lua", [3] = "dc_agent.lua", [4] = "dc_agent.lua", [6] = "dc_remote.lua" }
+
+local function ownedBoot()
+    if not fs.exists(BOOT_HOOK) or fs.isDir(BOOT_HOOK) then return false end
+    local contents = readFile(BOOT_HOOK)
+    return contents and contents:sub(1,#BOOT_MARK)==BOOT_MARK or false
+end
+local function writeBootFile(name, source)
+    local tmp = name .. ".tynew"
+    if fs.exists(tmp) then error("Staged boot file already exists: " .. tmp) end
+    writeFile(tmp, source)
+    if readFile(tmp) ~= source then
+        safeDelete(tmp)
+        error("Unable to verify staged file " .. tmp)
+    end
+    if fs.exists(name) then fs.delete(name) end
+    fs.move(tmp,name)
+    assert(readFile(name) == source, "Boot file write verification failed")
+end
+local function bootSource()
+    local program = BOOT_PROGRAMS[ID]
+    return BOOT_MARK .. "\n" ..
+        "-- Created locally by ty.lua; this script opens one managed service tab.\n" ..
+        "if os.getComputerID() ~= " .. ID .. " then print('TY boot: computer ID changed'); return end\n" ..
+        "local program = " .. string.format("%q",program) .. "\n" ..
+        "if not fs.exists(program) then print('TY boot: missing ' .. program); return end\n" ..
+        "if not shell.openTab then print('TY boot: Multishell required'); return end\n" ..
+        "local ok, tab = pcall(shell.openTab, program)\n" ..
+        "if not ok or not tab then print('TY boot: launch failed ' .. tostring(tab)); return end\n" ..
+        "print('TY boot: opened ' .. program .. ' in tab ' .. tab)\n"
+end
+local function bootStatus()
+    if not role then say("No boot profile for #" .. ID);return end
+    local program=BOOT_PROGRAMS[ID]
+    say("Boot profile: #" .. ID .. " / " .. role.name .. " / " .. program)
+    local active=ownedBoot()
+    if fs.exists(BOOT_HOOK) and not active then
+        say("WARNING: startup hook exists but is NOT TY-managed")
+    end
+    say("Auto-start hook: " .. (active and "ENABLED" or "DISABLED"))
+    if ID==3 or ID==4 then
+        local flag = readFile(BOOT_DESIRED)
+        say("Desired managed service after boot: " .. (active and flag and flag:match("^%s*1%s*$") and "RUN" or "STOP"))
+        local agent=readFile("dc_agent.lua")
+        say("Boot-aware agent: " .. (agent and agent:find(AGENT_MARK,1,true) and "YES" or "NO"))
+    end
+    say("Existing running programs are not restarted or stopped by this command.")
+end
+local function findStartupConflict()
+    -- Fail closed if another startup file launches any of the services that we manage.
+    -- Unrelated startup.lua programs remain untouched and continue running.
+    local names={"startup.lua", "startup"}
+    if fs.exists("startup") and fs.isDir("startup") then
+        for _,name in ipairs(fs.list("startup")) do
+            local path="startup/"..name
+            if path~=BOOT_HOOK and not fs.isDir(path) then names[#names+1]=path end
+        end
+    end
+    for _,path in ipairs(names) do
+        if fs.exists(path) and not fs.isDir(path) then
+            local contents=readFile(path)
+            if not contents then return path end
+            for _,program in ipairs({"dc_center.lua","dc_agent.lua","mek_send.lua","mek_watch.lua","ty_managed.lua"}) do
+                if contents:find(program,1,true) then return path end
+            end
+        end
+    end
+    return nil
+end
+local function upgradeBootAgentIfNeeded()
+    if ID ~= 3 and ID ~= 4 then return true end
+    local agent=readFile("dc_agent.lua")
+    if not agent then say("ABORT: dc_agent.lua missing. Install the existing role first.");return false end
+    if agent:find(AGENT_MARK,1,true) then return true end
+    say("Your running agent is an older version without boot-state persistence.")
+    say("Only dc_agent.lua on DISK will be replaced; mek_send.lua/mek_watch.lua and running services are not touched.")
+    if not confirm("AGENT", "Upgrade boot-capable agent on disk?") then
+        say("Cancelled; no boot hook installed");return false
+    end
+    local source,reason=getSource("dc_agent.lua")
+    if not source then say("ABORT: "..reason);return false end
+    if not source:find(AGENT_MARK,1,true) then say("ABORT: GitHub agent lacks boot support");return false end
+    local tmp,bak="dc_agent.lua.tybootnew","dc_agent.lua.tybootbak"
+    if fs.exists(tmp) or fs.exists(bak) then
+        say("ABORT: existing boot-agent staging/backup file. Check " .. tmp .. " or " .. bak);return false
+    end
+    local ok,err=pcall(function()
+        writeFile(tmp,source)
+        assert(readFile(tmp)==source,"Staged agent mismatch")
+        fs.copy("dc_agent.lua",bak)
+        fs.delete("dc_agent.lua")
+        fs.move(tmp,"dc_agent.lua")
+        assert(readFile("dc_agent.lua")==source,"Installed agent mismatch")
+    end)
+    if not ok then
+        say("ERROR updating agent: " .. tostring(err))
+        if fs.exists(bak) then
+            local restored,restoreErr=pcall(function()
+                if fs.exists("dc_agent.lua") then fs.delete("dc_agent.lua") end
+                fs.copy(bak,"dc_agent.lua")
+            end)
+            if not restored then say("RESTORE FAILED: " .. tostring(restoreErr)) end
+        end
+        safeDelete(tmp)
+        return false
+    end
+    say("Boot-aware agent installed on disk. Backup: "..bak)
+    say("Current agent tab still runs the old code until its next restart.")
+    return true
+end
+local function bootOn()
+    if not role then say("No boot profile for unknown computer #" .. ID);return false end
+    if fs.exists(BOOT_HOOK) then
+        if ownedBoot() then say("Boot hook already installed; no files changed.");bootStatus();return true end
+        say("ABORT: foreign startup/ty_managed.lua detected; will not overwrite.")
+        return false
+    end
+    local conflict=findStartupConflict()
+    if conflict then
+        say("ABORT: another startup file may already launch the managed service: " .. conflict)
+        say("Check it manually to avoid duplicate services; no files changed.")
+        return false
+    end
+    if not fs.exists(BOOT_PROGRAMS[ID]) then
+        say("ABORT: " .. BOOT_PROGRAMS[ID] .. " is missing. Run ty install first.")
+        return false
+    end
+    if fs.exists("startup") and not fs.isDir("startup") then
+        say("ABORT: startup is a file, not a directory; cannot install managed hook.")
+        return false
+    end
+    if (ID==3 or ID==4) and fs.exists(BOOT_DESIRED) then
+        say("ABORT: existing boot-service state file; inspect before enabling.")
+        return false
+    end
+    if (ID==3 or ID==4) then
+        local pair=readFile("dc_center.id")
+        if not pair or tonumber(pair)~=0 then
+            say("ABORT: agent must be paired with data centre #0 first.");return false
+        end
+    end
+    if not confirm("BOOT", "Enable automatic boot launcher on #" .. ID .. "?") then
+        say("Cancelled; no files changed.");return false
+    end
+    if not upgradeBootAgentIfNeeded() then return false end
+    local result,err=pcall(function()
+        if not fs.exists("startup") then fs.makeDir("startup") end
+        assert(fs.isDir("startup"),"startup is not a directory")
+        if ID==3 or ID==4 then
+            assert(not fs.exists(BOOT_DESIRED),"Boot desired state file already exists; inspect first")
+            writeBootFile(BOOT_DESIRED,"1\n")
+        end
+        writeBootFile(BOOT_HOOK,bootSource())
+    end)
+    if not result then
+        safeDelete(BOOT_HOOK .. ".tynew")
+        safeDelete(BOOT_HOOK)
+        if ID==3 or ID==4 then
+            safeDelete(BOOT_DESIRED .. ".tynew")
+            -- A newly-created desired state without a hook must not activate.
+            -- Do not remove a pre-existing user file if failure happened before creation.
+            if fs.exists(BOOT_DESIRED) and not ownedBoot() then safeDelete(BOOT_DESIRED) end
+        end
+        say("Boot setup failed: " .. tostring(err))
+        return false
+    end
+    say("Boot enabled. It takes effect on the NEXT computer startup.")
+    if ID==3 or ID==4 then say("Boot starts the management agent and its monitored app; it NEVER activates the reactor.") end
+    say("Do not keep any separate startup.lua that launches the same service.")
+    return true
+end
+local function bootOff()
+    if not role then say("No boot profile for unknown computer #" .. ID);return false end
+    if not fs.exists(BOOT_HOOK) then
+        say("Boot hook already absent; no changes.");return true
+    end
+    if not ownedBoot() then say("ABORT: boot hook is not TY-managed; refusing deletion.");return false end
+    if not confirm("OFF", "Disable managed auto-start on #" .. ID .. "?") then return false end
+    local ok,err=pcall(function()
+        -- Removing the hook first makes any old desired-state flag inert.
+        fs.delete(BOOT_HOOK)
+        if (ID==3 or ID==4) and fs.exists(BOOT_DESIRED) then fs.delete(BOOT_DESIRED) end
+    end)
+    if not ok then say("Boot disable incomplete: " .. tostring(err));return false end
+    say("Boot disabled; currently running processes have NOT been stopped.")
+    return true
+end
+local function bootAction(which)
+    if which=="status" or which==nil then bootStatus()
+    elseif which=="on" then bootOn()
+    elseif which=="off" then bootOff()
+    else say("Usage: ty.lua boot status|on|off") end
+end
+
 local function help()
     say("One updater for ATM10 CC:Tweaked computers")
     print("Computer: #" .. ID .. "; role: " .. (role and role.name or "UNKNOWN"))
@@ -324,13 +523,17 @@ local function help()
     print("  ty.lua update   - update role files and updater")
     print("  ty.lua fleet   - centre #0 safely remote-update base #4")
     print("  ty.lua all     - centre #0 local update + remote base update")
+    print("  ty.lua boot status - inspect managed startup policy")
+    print("  ty.lua boot on/off - enable/disable managed boot resume")
     print("  ty.lua help    - display these instructions")
-    print("No auto-start / no auto-SCRAM / no safety lock changes.")
+    print("No auto-SCRAM or reactor activation. Boot recovery requires explicit opt-in.")
 end
 if ACTION == "help" then
     help()
 elseif ACTION == "status" then
     printLocal()
+elseif ACTION == "boot" then
+    bootAction(argv[2])
 elseif ACTION == "check" then
     localUpdate("check")
 elseif ACTION == "install" or ACTION == "update" then
