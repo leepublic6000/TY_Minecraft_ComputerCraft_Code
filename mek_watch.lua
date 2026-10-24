@@ -284,7 +284,8 @@ local function actionAllowed(action)
     if action=="setBurnRate" then return type(policy().burnRateCap)=="number" end
     if action=="setLogicMode" then return policy().logicMode==true end
     if action=="setDumpingMode" then return policy().turbineMode==true end
-    return action=="scram"
+    if action=="scram" then return policy().scram==true end
+    return false
 end
 
 local function requestCommand(action, desired)
