@@ -89,3 +89,7 @@
 5. `ty.lua boot on` **不能透過舊版 `dc_agent.lua` 憑空寫入遠端電腦**。首次啟用需要各台電腦本機各執行一次（或透過玩家已有的合法本機檔案管理方式），此後才具備重啟自動恢復。資料中心 #0 與 Pocket #6 的既有查詢／遠端管理流程不變。
 
 > **版本驗證界線**：Lua 5.4 語法檢查、舊版 12 項與新增 15 項模擬測試通過；自動重啟／重載流程尚未在使用者的 ATM10 8.3 世界中實機驗證，不能當作核電廠安全系統。
+
+## 完整遠端 Shell 的安裝檔案
+
+更新後的 `ty.lua` 會依電腦角色加裝：#0 與 #4 的 `dc_shell_host.lua`、#6 的 `dc_shell_client.lua`（#3 停堆維護時也能選擇安裝 Host）。執行 `ty.lua update`／`ty.lua install` 僅管理磁碟檔案，**不會自動執行 `dc_shell_host.lua enable` 或解除核電廠安全鎖定**。新版資料中心與 Pocket 管理程序須重新啟動，才能使用 `pdc> shell 4`。詳見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
