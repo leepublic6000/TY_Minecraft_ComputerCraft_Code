@@ -6,10 +6,10 @@ local ACTION = argv[1] or "help"
 local ID = os.getComputerID()
 local BASE_URL = "https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/"
 local ROLES = {
-    [0] = { name="DATA CENTRE", files={"dc_center.lua", "dc_shell_host.lua", "dc_chat_probe.lua"} },
+    [0] = { name="DATA CENTRE", files={"dc_center.lua", "dc_shell_host.lua", "dc_auth.lua", "dc_chat_probe.lua"} },
     [3] = { name="NUCLEAR PLANT", files={"dc_agent.lua", "mek_send.lua", "dc_shell_host.lua"} },
-    [4] = { name="BASE", files={"dc_agent.lua", "mek_watch.lua", "dc_shell_host.lua"} },
-    [6] = { name="POCKET", files={"dc_remote.lua", "mek_pocket.lua", "dc_shell_client.lua"} },
+    [4] = { name="BASE", files={"dc_agent.lua", "mek_watch.lua", "dc_shell_host.lua", "dc_remote.lua"} },
+    [6] = { name="POCKET", files={"dc_remote.lua", "mek_pocket.lua", "dc_shell_client.lua", "dc_2fa.lua"} },
 }
 local role = ROLES[ID]
 local COMMAND = "ty.dc.v1:command"
