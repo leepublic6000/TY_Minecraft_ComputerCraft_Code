@@ -23,18 +23,37 @@
 ## 以後：不用再逐一輸入 GitHub URL
 
 - `ty.lua status`：只查看本機已安裝的檔案。
-- `ty.lua check`：對比 GitHub 版本，**不寫入**。
-- `ty.lua update`：更新該台電腦所需的程式與安裝器本身；如無差異就不覆寫。
+- `ty.lua check`：比對所有本機受管理檔案與 GitHub 的版本，**不寫入**；也可用 `ty.lua check ty.lua` 只檢查單檔。
+- `ty.lua update`：**僅列出這台電腦可選擇更新的程式，不下載或改寫檔案**。
+- `ty.lua update <檔名>`：例如 `ty.lua update ty.lua` 或 `ty.lua update dc_agent.lua`，**僅更新指定的一個受管理檔案**，不重新啟動執行中的程式。
+- `ty.lua update all`：明確更新**這台電腦所有**角色檔案與安裝器本身；與原本的全檔更新流程一樣，如無差異不覆寫。
 - `ty.lua fleet`：**僅在資料中心 #0**，透過已配對的現有 `dc_agent.lua` 安全更新基地 #4 的監控服務（必要時先停止、更新後恢復執行）。
 - `ty.lua all`：**僅在資料中心 #0**，先更新資料中心程式，再執行 `fleet`；這是日後最常用的集中更新命令。
 
 執行 `ty.lua all` 時，需要依畫面回覆 `YES`（本機檔案替換確認），與 `FLEET`（遠端更新確認）。它不會自動重啟執行中的 `dc_center.lua`，所以有更新時仍需切回資料中心主控台，輸入 `exit`，再從 Shell 執行 `dc_center.lua`。已運行的 #3、#4 代理不受影響。
 
+選擇更新和全部更新都沿用相同的語法檢查、暫存檔、`.tybak` 備份、安裝後讀回驗證與失敗回復流程。可更新的檔名只能來自本機電腦 ID 對應的白名單，不接受任意路徑或網址；`ty.lua update all` 只作用於**本機**，不會遠端更新其他電腦。
+
+## 舊版 ty.lua 升級到選擇更新
+
+如果 #3 的舊管理器顯示 `Unknown command boot`，代表它尚未支援選擇更新；**不要直接在舊版下輸入 `ty.lua update ty.lua`**，因為舊版會忽略第二個參數，仍嘗試全部更新。
+
+在 #3 的 CraftOS `>` 終端下載最新版至**另一個不存在的檔名**，例如：
+
+```text
+wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/ty.lua ty_select.lua
+ty_select.lua check ty.lua
+ty_select.lua update ty.lua
+```
+
+依提示輸入大寫 `YES`。這只會替換磁碟上的 `ty.lua`，保留 `ty.lua.tybak`，不更新 `mek_send.lua`、不停止服務，也不會啟動或關閉反應爐。完成後才使用 `ty.lua update` 列出選項，以及 `ty.lua boot status`／`ty.lua boot on` 設定開機恢復。若 `ty_select.lua` 已存在，請改用其他未使用的檔名，避免覆寫自訂檔案。
+
 ## 核電廠專用安全規範
 
 - **不自動更新執行中的核電廠 #3。** `ty.lua fleet` / `ty.lua all` 會跳過 #3，不會自動 SCRAM，也不會讓監控突然中斷。
 - 若確定反應爐已安全停止，可在 Pocket #6 透過資料中心管理指令 `stop 3`（代理會獨立檢查 `getStatus() == false`），然後由你主動下 `update 3`、`start 3`。更新會用 GitHub 版本覆蓋 `mek_send.lua`，既有安全 CFG 設定會變更；**操作前要另存並確認原有安全設定，不可無條件更新**。
-- 若從 #3 本機執行 `ty.lua update`，只有 `getStatus() == false` 才允許覆寫。若現有 `mek_send.lua` 與最新內容不同，會要求另外輸入 `REPLACE`，提醒安全設定可能被覆蓋。
+- 在 #3 本機用**新版** `ty.lua update ty.lua`、`ty.lua update dc_agent.lua` 等指令，只更換選定的非反應爐控制程式**磁碟檔案**，反應爐運轉中也可進行；不會停止或重啟目前服務，但舊程式要到下一次正常啟動才會載入新版。
+- 在 #3 本機執行 `ty.lua update mek_send.lua` 或 `ty.lua update all`，仍必須確認 `getStatus() == false` 才允許覆寫；若現有 `mek_send.lua` 與最新內容不同，仍須輸入 `REPLACE`，避免默默覆蓋本機安全設定。**不能靠更新其他程式繞過此檢查**。
 - 新版程式在磁碟安裝完成，不代表背景正在執行的舊程式已載入新版；必須在確認設備安全時才重啟服務。
 
 ## 管理限制
@@ -43,7 +62,7 @@
 
 `ty.lua` 更新檔案時會保留一份 `.tybak` 舊版（後續更新會替換該備份），並在某次套用失敗時嘗試還原本次修改的檔案；若提示還原失敗，應先檢查檔案，不要直接重複執行。
 
-> 版本狀態：已通過 Lua 5.4 語法檢查及模擬測試（更新流程、無差異略過、下載失敗、語法錯誤、回滾、核電廠保護、資料中心轉送）；仍待 ATM10 8.3 遊戲內驗證。
+> 版本狀態：原版更新流程曾通過 Lua 5.4 語法及模擬測試；本次新增的「選擇／全部更新」已做靜態分支與白名單檢查，仍須在 ATM10 8.3 實機驗證其更新結果，不能將原版測試視為新版完整通過。
 
 ## 開機自動恢復（opt-in，不會自動啟動反應爐）
 
@@ -59,7 +78,7 @@
 ### 第一次啟用（每台電腦只需一次）
 
 1. 先確定要操作的電腦在 CraftOS `>` Shell，而非 `dc>`、`pdc>` 或 `(lua)>`。
-2. 更新或從 Windows 拖曳最新版 `ty.lua`。已安裝 `ty.lua` 的資料中心 #0 可先使用 `ty.lua update`；**核電廠 #3 若正在運轉，不要為了啟用開機功能而強行執行完整 `ty.lua update`**，以免觸及 `mek_send.lua`。
+2. 更新或從 Windows 拖曳最新版 `ty.lua`。已使用新版安裝器時，可用 `ty.lua update ty.lua` 單獨更新；若 #3 仍是沒有 `boot` 的舊版，請先照上方「舊版 ty.lua 升級到選擇更新」步驟取得新版。**核電廠 #3 運轉中不要執行 `ty.lua update all`**，以免觸及 `mek_send.lua`。
 3. 在 #0、#3、#4 各自執行：
 
    ```text
@@ -92,4 +111,4 @@
 
 ## 完整遠端 Shell 的安裝檔案
 
-更新後的 `ty.lua` 會依電腦角色加裝：#0 與 #4 的 `dc_shell_host.lua`、#6 的 `dc_shell_client.lua`（#3 停堆維護時也能選擇安裝 Host）。執行 `ty.lua update`／`ty.lua install` 僅管理磁碟檔案，**不會自動執行 `dc_shell_host.lua enable` 或解除核電廠安全鎖定**。新版資料中心與 Pocket 管理程序須重新啟動，才能使用 `pdc> shell 4`。詳見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
+更新後的 `ty.lua` 會依電腦角色加裝：#0 與 #4 的 `dc_shell_host.lua`、#6 的 `dc_shell_client.lua`（#3 停堆維護時也能選擇安裝 Host）。執行 `ty.lua update <檔名>`／`ty.lua update all`／`ty.lua install` 僅管理磁碟檔案，**不會自動執行 `dc_shell_host.lua enable` 或解除核電廠安全鎖定**。新版資料中心與 Pocket 管理程序須重新啟動，才能使用 `pdc> shell 4`。詳見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
