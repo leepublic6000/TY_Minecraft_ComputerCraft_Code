@@ -6,10 +6,10 @@
 
 | ID | 角色 | `ty.lua install` 安裝的程式 |
 | ---: | --- | --- |
-| 0 | 資料中心 | `dc_center.lua`、`ty.lua` |
-| 3 | 核電廠 | `dc_agent.lua`、`mek_send.lua`、`ty.lua` |
-| 4 | 基地 | `dc_agent.lua`、`mek_watch.lua`、`ty.lua` |
-| 6 | 新 Pocket | `dc_remote.lua`、`mek_pocket.lua`、`ty.lua` |
+| 0 | 資料中心 | `dc_center.lua`、`dc_shell_host.lua`、`dc_chat_probe.lua`、`ty.lua` |
+| 3 | 核電廠 | `dc_agent.lua`、`mek_send.lua`、`dc_shell_host.lua`、`ty.lua` |
+| 4 | 基地 | `dc_agent.lua`、`mek_watch.lua`、`dc_shell_host.lua`、`ty.lua` |
+| 6 | 新 Pocket | `dc_remote.lua`、`mek_pocket.lua`、`dc_shell_client.lua`、`ty.lua` |
 
 未知 ID 不會猜測角色，也不會修改任何檔案。更新不碰 `startup.lua`、`dc_center.id`、核電廠的世界資料或其它自訂檔案。
 
