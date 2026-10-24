@@ -9,7 +9,9 @@ local HOST = "ty.dc.v1:center"
 -- Pocket #6 may call this gateway. Rednet IDs are NOT cryptographic identities.
 local REMOTE_REQ = "ty.dc.v1:remote_request"
 local REMOTE_RESP = "ty.dc.v1:remote_response"
-local REMOTE_ALLOWED = { [6] = true }
+local REMOTE_ALLOWED = { [6] = true } -- legacy mode only, before auth enable
+local auth = dofile("dc_auth.lua")
+local AUTH_REQ = auth.protocol()
 local known = { [6]="Pocket", [3]="Nuclear Plant", [4]="Base" }
 local nodes = {}
 local pendingId, pendingTarget, pendingReply = nil, nil, nil
@@ -94,11 +96,17 @@ local REMOTE_NODE_ACTIONS = {
     status=true, update=true, start=true, stop=true, restart=true,
 }
 local function onRemoteRequest(client, packet)
-    if not REMOTE_ALLOWED[client] then return end
+    if type(packet) ~= "table" then return end
+    if not auth.enabled() and not REMOTE_ALLOWED[client] then return end
     if type(packet.requestId) ~= "string" or #packet.requestId < 1
         or #packet.requestId > 48 or not packet.requestId:match("^[%w_:%-]+$")
         or type(packet.action) ~= "string" then return end
     local requestId, action = packet.requestId, packet.action
+    if auth.enabled() then
+        local allowed, reason = auth.authorize(client,packet.auth,action)
+        if not allowed then remoteRespond(client,requestId,false,reason or "Login required");return end
+        auth.audit(allowed.uuid,client,"remote:"..action,"accepted")
+    end
     if action == "nodes" then
         remoteRespond(client, requestId, true, "Nodes listed", remoteNodes())
         return
@@ -183,7 +191,19 @@ local function shellError(client, sid, target, reason)
     rednet.send(client,{v=1,kind="error",sid=sid,target=target,reason=reason},SHELL_CLIENT_REPLY)
 end
 local function onShellClient(client, packet)
-    if not REMOTE_ALLOWED[client] or type(packet)~="table" or packet.v~=1 then return end
+    if type(packet)~="table" or packet.v~=1 then return end
+    if not auth.enabled() and not REMOTE_ALLOWED[client] then return end
+    local authorized = nil
+    if auth.enabled() then
+        local grant, reason=auth.authorize(client,packet.auth,"shell")
+        if not grant then
+            if type(packet.sid)=="string" and type(packet.target)=="number" then
+                shellError(client,packet.sid,packet.target,reason or "Login required")
+            end
+            return
+        end
+        authorized=grant.uuid
+    end
     local target=packet.target
     if target~=3 and target~=4 then return end
     local sid=packet.sid
@@ -203,7 +223,8 @@ local function onShellClient(client, packet)
             or packet.w<16 or packet.w>51 or packet.h<8 or packet.h>25 then
             shellError(client,sid,target,"Invalid terminal size");return
         end
-        terminalSessions[target]={sid=sid,client=client,last=os.clock()}
+        terminalSessions[target]={sid=sid,client=client,last=os.clock(),uuid=authorized}
+        if authorized then auth.audit(authorized,client,"shell_open:"..target,"accepted") end
     else
         if not ses or ses.client~=client or ses.sid~=sid then return end
         ses.last=os.clock()
@@ -216,7 +237,10 @@ local function onShellClient(client, packet)
     if not sent then
         terminalSessions[target]=nil
         shellError(client,sid,target,"Could not send to node")
-    elseif kind=="close" then terminalSessions[target]=nil end
+    elseif kind=="close" then
+        if ses and ses.uuid then auth.audit(ses.uuid,client,"shell_close:"..target,"closed") end
+        terminalSessions[target]=nil
+    end
 end
 local function onShellHostReply(sender,packet)
     if sender~=3 and sender~=4 then return end
@@ -235,6 +259,7 @@ local function receiveLoop()
         local id, msg, proto = rednet.receive(nil, 1)
         if id and proto==SHELL_CLIENT then onShellClient(id,msg)
         elseif id and proto==SHELL_HOST_REPLY then onShellHostReply(id,msg)
+        elseif id and proto==AUTH_REQ then auth.handle(id,msg)
         end
         if id and type(msg) == "table" and msg.version == 1 then
             if proto == HEART and msg.kind == "node" and msg.id == id
@@ -309,6 +334,11 @@ local function sendCommand(id, action)
     print("No ACK within 8 seconds. Execution status UNKNOWN; use info before retrying.")
 end
 local function help()
+    print("auth claim     - Start admin enrollment (locally only)")
+    print("auth enroll    - Add a read-only player (locally only)")
+    print("auth confirm   - Approve player claim (locally only)")
+    print("auth enable    - Turn on login gate once Pocket is updated")
+    print("auth status    - Display authentication state")
     print("nodes          - List computers and agent state")
     print("info <id>      - Show last known status")
     print("status <id>    - Ask agent for fresh status")
@@ -331,6 +361,15 @@ local function consoleLoop()
         if cmd == "exit" or cmd == "quit" then
             return
         elseif cmd == "help" then help()
+        elseif cmd == "auth" then
+            local ok,message
+            if arg=="claim" then ok,message=auth.beginClaim("admin")
+            elseif arg=="enroll" then ok,message=auth.beginClaim("viewer")
+            elseif arg=="confirm" then ok,message=auth.confirmClaim()
+            elseif arg=="enable" then ok,message=auth.enable()
+            elseif arg=="status" then print(auth.status());ok=true
+            else print("auth claim|enroll|confirm|enable|status");ok=true end
+            if message then print((ok and "OK: " or "ERROR: ")..message) end
         elseif cmd == "nodes" then listNodes()
         elseif cmd == "info" then
             local id=tonumber(arg)
@@ -346,7 +385,23 @@ local function consoleLoop()
         end
     end
 end
+local function onAuthRevoke(uuid)
+    for target,ses in pairs(terminalSessions) do
+        if ses.uuid==uuid then
+            rednet.send(target,{v=1,kind="close",sid=ses.sid,target=target},SHELL_HOST)
+            shellError(ses.client,ses.sid,target,"Player devices revoked")
+            terminalSessions[target]=nil
+        end
+    end
+end
+local function authChatLoop()
+    while true do
+        local _,uuid,name,message,hidden=os.pullEvent("chat")
+        auth.chat(uuid,name,message,hidden)
+    end
+end
 openWireless()
+auth.configure(function(id,packet,protocol) return rednet.send(id,packet,protocol) end,onAuthRevoke)
 rednet.host(HOST, "ty-dc")
-parallel.waitForAny(receiveLoop, consoleLoop)
+parallel.waitForAny(receiveLoop, consoleLoop, authChatLoop)
 rednet.unhost(HOST)
