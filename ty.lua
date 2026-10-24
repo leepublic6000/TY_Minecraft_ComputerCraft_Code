@@ -6,10 +6,10 @@ local ACTION = argv[1] or "help"
 local ID = os.getComputerID()
 local BASE_URL = "https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/"
 local ROLES = {
-    [0] = { name="DATA CENTRE", files={"dc_center.lua"} },
-    [3] = { name="NUCLEAR PLANT", files={"dc_agent.lua", "mek_send.lua"} },
-    [4] = { name="BASE", files={"dc_agent.lua", "mek_watch.lua"} },
-    [6] = { name="POCKET", files={"dc_remote.lua", "mek_pocket.lua"} },
+    [0] = { name="DATA CENTRE", files={"dc_center.lua", "dc_shell_host.lua"} },
+    [3] = { name="NUCLEAR PLANT", files={"dc_agent.lua", "mek_send.lua", "dc_shell_host.lua"} },
+    [4] = { name="BASE", files={"dc_agent.lua", "mek_watch.lua", "dc_shell_host.lua"} },
+    [6] = { name="POCKET", files={"dc_remote.lua", "mek_pocket.lua", "dc_shell_client.lua"} },
 }
 local role = ROLES[ID]
 local COMMAND = "ty.dc.v1:command"
@@ -525,6 +525,7 @@ local function help()
     print("  ty.lua all     - centre #0 local update + remote base update")
     print("  ty.lua boot status - inspect managed startup policy")
     print("  ty.lua boot on/off - enable/disable managed boot resume")
+    print("  dc_shell_host.lua enable - opt-in full Shell locally on target")
     print("  ty.lua help    - display these instructions")
     print("No auto-SCRAM or reactor activation. Boot recovery requires explicit opt-in.")
 end
