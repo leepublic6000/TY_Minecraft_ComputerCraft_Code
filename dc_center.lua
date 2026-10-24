@@ -5,10 +5,17 @@ local HEART = "ty.dc.v1:heart"
 local CMD = "ty.dc.v1:command"
 local REPLY = "ty.dc.v1:reply"
 local HOST = "ty.dc.v1:center"
+-- Pocket remote management uses its own protocol. Only the trusted, verified
+-- Pocket #2 may call this gateway. Rednet IDs are NOT cryptographic identities.
+local REMOTE_REQ = "ty.dc.v1:remote_request"
+local REMOTE_RESP = "ty.dc.v1:remote_response"
+local REMOTE_ALLOWED = { [2] = true }
 local known = { [2]="Pocket", [3]="Nuclear Plant", [4]="Base" }
 local nodes = {}
 local pendingId, pendingTarget, pendingReply = nil, nil, nil
 local nonce = 0
+local remotePending = nil -- ONE remote node command at a time; local console remains available
+local consoleBusy = false -- Serialise confirmations and commands from local + Pocket
 
 local function openWireless()
     local found = false
@@ -52,6 +59,118 @@ local function showInfo(id)
     print("Last seen: " .. math.floor(os.clock() - n.seen) .. " seconds ago")
     if n.lastError then print("Last error: " .. tostring(n.lastError)) end
 end
+-- The Pocket sees the SAME node state used by the local dc> console.
+-- Read-only requests are handled immediately. Mutation requests are forwarded
+-- as fixed allowlisted actions to the existing dc_agent.lua on each node.
+local function remoteRespond(client, requestId, ok, message, data)
+    rednet.send(client, {
+        version=1, requestId=requestId, ok=ok,
+        message=message, data=data,
+    }, REMOTE_RESP)
+end
+local function remoteNodes()
+    local result = {}
+    for _, id in ipairs(orderedIDs()) do
+        local node = nodes[id]
+        result[#result+1] = {
+            id=id, label=(node and node.label or known[id] or "unknown"):sub(1,40),
+            online=not not online(id), state=node and tostring(node.state) or "--",
+            paired=node ~= nil and node.pairedCenter == os.getComputerID(),
+        }
+    end
+    return result
+end
+local function remoteInfo(id)
+    local n = nodes[id]
+    if not n then return nil end
+    return {
+        id=id, label=n.label, online=not not online(id),
+        role=n.role, program=n.program, state=n.state,
+        pairedCenter=n.pairedCenter, lastError=n.lastError,
+        lastSeenSeconds=math.floor(os.clock()-n.seen),
+    }
+end
+local REMOTE_NODE_ACTIONS = {
+    status=true, update=true, start=true, stop=true, restart=true,
+}
+local function onRemoteRequest(client, packet)
+    if not REMOTE_ALLOWED[client] then return end
+    if type(packet.requestId) ~= "string" or #packet.requestId < 1
+        or #packet.requestId > 48 or not packet.requestId:match("^[%w_:%-]+$")
+        or type(packet.action) ~= "string" then return end
+    local requestId, action = packet.requestId, packet.action
+    if action == "nodes" then
+        remoteRespond(client, requestId, true, "Nodes listed", remoteNodes())
+        return
+    end
+    local target = packet.target
+    if type(target) ~= "number" or target < 0 or target ~= math.floor(target)
+        or target >= 65500 then
+        remoteRespond(client, requestId, false, "Valid target computer ID required")
+        return
+    end
+    if action == "info" then
+        local info = remoteInfo(target)
+        if not info then
+            remoteRespond(client, requestId, false, "No heartbeat from #" .. target)
+        else
+            remoteRespond(client, requestId, true, "Last known node status", info)
+        end
+        return
+    end
+    if not REMOTE_NODE_ACTIONS[action] then
+        remoteRespond(client, requestId, false, "Action not allowed")
+        return
+    end
+    if action ~= "status" and packet.confirmed ~= true then
+        remoteRespond(client, requestId, false, "Confirmation required")
+        return
+    end
+    if remotePending or pendingId or consoleBusy then
+        remoteRespond(client, requestId, false, "Data centre busy with another command")
+        return
+    end
+    if not online(target) then
+        remoteRespond(client, requestId, false, "Node #" .. target .. " OFFLINE")
+        return
+    end
+    if nodes[target].pairedCenter ~= os.getComputerID() then
+        remoteRespond(client, requestId, false, "Node #" .. target .. " not paired to centre")
+        return
+    end
+    local agentId = "pc:" .. client .. ":" .. requestId
+    remotePending = {
+        client=client, requestId=requestId, agentRequestId=agentId,
+        target=target, started=os.clock(),
+    }
+    local sent = rednet.send(target, {
+        version=1, requestId=agentId, action=action,
+    }, CMD)
+    if not sent then
+        remotePending = nil
+        remoteRespond(client, requestId, false, "Modem failed to send command")
+    end
+end
+local function onRemoteAgentReply(sender, message)
+    local p = remotePending
+    if not p or sender ~= p.target or message.requestId ~= p.agentRequestId then
+        return false
+    end
+    remotePending = nil
+    if type(message.status) == "table" then
+        local st = message.status
+        -- Keep local centre's node summary current after the agent ACK.
+        nodes[sender] = {
+            seen=os.clock(), label=tostring(st.label or "Unknown"):sub(1,80),
+            role=tostring(st.role or "Unknown"):sub(1,30),
+            state=tostring(st.state or "--"), program=st.program,
+            pairedCenter=st.pairedCenter, lastError=st.lastError,
+        }
+    end
+    remoteRespond(p.client, p.requestId, message.ok == true,
+        tostring(message.message or "No message"), remoteInfo(sender))
+    return true
+end
 local function receiveLoop()
     while true do
         local id, msg, proto = rednet.receive(nil, 1)
@@ -67,31 +186,49 @@ local function receiveLoop()
             elseif proto == REPLY and id == pendingTarget
                 and type(msg.requestId) == "string" and msg.requestId == pendingId then
                 pendingReply = { id=id, ok=msg.ok == true, message=msg.message, status=msg.status }
+            elseif proto == REPLY and type(msg.requestId) == "string" then
+                onRemoteAgentReply(id, msg)
+            elseif proto == REMOTE_REQ then
+                onRemoteRequest(id, msg)
             end
+        end
+        if remotePending and os.clock() - remotePending.started >= 9 then
+            local p = remotePending
+            remotePending = nil
+            remoteRespond(p.client, p.requestId, false,
+                "No agent ACK within 9 seconds; execution state UNKNOWN. Use info.")
         end
     end
 end
 local function sendCommand(id, action)
+    if remotePending then print("Pocket command in progress; retry shortly"); return end
     if not online(id) then print("#" .. id .. " OFFLINE; no agent heartbeat"); return end
     if nodes[id].pairedCenter ~= os.getComputerID() then
         print("#" .. id .. " is not paired with this data centre")
         return
     end
+    consoleBusy = true
     if action ~= "status" then
         write("Confirm " .. action .. " on #" .. id .. ": type YES > ")
-        if read() ~= "YES" then print("Cancelled"); return end
+        if read() ~= "YES" then
+            consoleBusy = false
+            print("Cancelled")
+            return
+        end
     end
     nonce = nonce + 1
     local req = tostring(os.epoch("utc")) .. ":" .. tostring(nonce)
     pendingId, pendingTarget, pendingReply = req, id, nil
     if not rednet.send(id, {version=1, requestId=req, action=action}, CMD) then
         pendingId, pendingTarget = nil, nil
+        consoleBusy = false
         print("Failed to send"); return
     end
     for _=1,80 do
         local answer = pendingReply
         if answer and answer.id == id then
             pendingId, pendingTarget, pendingReply = nil, nil, nil
+            consoleBusy = false
             print((answer.ok and "OK: " or "REJECTED: ") .. tostring(answer.message))
             if answer.status then
                 nodes[id] = {
@@ -106,6 +243,7 @@ local function sendCommand(id, action)
         sleep(0.1)
     end
     pendingId, pendingTarget, pendingReply = nil, nil, nil
+    consoleBusy = false
     print("No ACK within 8 seconds. Execution status UNKNOWN; use info before retrying.")
 end
 local function help()
