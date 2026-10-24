@@ -171,9 +171,71 @@ local function onRemoteAgentReply(sender, message)
         tostring(message.message or "No message"), remoteInfo(sender))
     return true
 end
+
+-- Dedicated remote-terminal gateway. The operator must be Pocket #6.
+-- This channel is UNAUTHENTICATED: use only in a trusted/private world.
+local SHELL_CLIENT = "ty.rsh.v1:client"
+local SHELL_HOST = "ty.rsh.v1:host"
+local SHELL_HOST_REPLY = "ty.rsh.v1:host_reply"
+local SHELL_CLIENT_REPLY = "ty.rsh.v1:client_reply"
+local terminalSessions = {} -- target -> {sid, client, last}
+local function shellError(client, sid, target, reason)
+    rednet.send(client,{v=1,kind="error",sid=sid,target=target,reason=reason},SHELL_CLIENT_REPLY)
+end
+local function onShellClient(client, packet)
+    if not REMOTE_ALLOWED[client] or type(packet)~="table" or packet.v~=1 then return end
+    local target=packet.target
+    if target~=3 and target~=4 then return end
+    local sid=packet.sid
+    if type(sid)~="string" or #sid<5 or #sid>70
+        or not sid:match("^[%w_:%-]+$") then return end
+    local kind=packet.kind
+    if kind~="open" and kind~="close" and kind~="input" and kind~="ping" then return end
+    local ses=terminalSessions[target]
+    if kind=="open" then
+        if ses and os.clock()-ses.last<45 then
+            shellError(client,sid,target,"Node has an active shell session");return
+        end
+        if not online(target) or nodes[target].pairedCenter~=os.getComputerID() then
+            shellError(client,sid,target,"Node is OFFLINE or not paired");return
+        end
+        if type(packet.w)~="number" or type(packet.h)~="number"
+            or packet.w<16 or packet.w>51 or packet.h<8 or packet.h>25 then
+            shellError(client,sid,target,"Invalid terminal size");return
+        end
+        terminalSessions[target]={sid=sid,client=client,last=os.clock()}
+    else
+        if not ses or ses.client~=client or ses.sid~=sid then return end
+        ses.last=os.clock()
+        if kind=="input" then
+            if type(packet.args)~="table" or #packet.args>4 then return end
+            if type(packet.event)~="string" or #packet.event>20 then return end
+        end
+    end
+    local sent=rednet.send(target,packet,SHELL_HOST)
+    if not sent then
+        terminalSessions[target]=nil
+        shellError(client,sid,target,"Could not send to node")
+    elseif kind=="close" then terminalSessions[target]=nil end
+end
+local function onShellHostReply(sender,packet)
+    if sender~=3 and sender~=4 then return end
+    local ses=terminalSessions[sender]
+    if not ses or type(packet)~="table" or packet.v~=1
+        or packet.sid~=ses.sid or packet.target~=sender then return end
+    ses.last=os.clock()
+    rednet.send(ses.client,packet,SHELL_CLIENT_REPLY)
+    if packet.kind=="closed" or packet.kind=="error" then
+        terminalSessions[sender]=nil
+    end
+end
+
 local function receiveLoop()
     while true do
         local id, msg, proto = rednet.receive(nil, 1)
+        if id and proto==SHELL_CLIENT then onShellClient(id,msg)
+        elseif id and proto==SHELL_HOST_REPLY then onShellHostReply(id,msg)
+        end
         if id and type(msg) == "table" and msg.version == 1 then
             if proto == HEART and msg.kind == "node" and msg.id == id
                 and type(msg.label) == "string" and type(msg.role) == "string"
