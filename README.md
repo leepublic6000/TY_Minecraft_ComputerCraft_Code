@@ -127,3 +127,7 @@ allow_remote_turbine_mode = false,
 完整部署方式與安全限制請見 [DATA_CENTER.md](DATA_CENTER.md)。
 
 Pocket #6 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0，直接執行 `nodes`、`info 3`、`update 3`、`start 3` 等管理命令。資料中心僅需一次更新 `dc_center.lua`，既有 #3、#4 代理不需重裝；詳見 [DATA_CENTER.md](DATA_CENTER.md)。
+
+### 電腦開機自動恢復（需手動啟用一次）
+
+最新版 `ty.lua` 新增 `ty.lua boot status`、`ty.lua boot on`、`ty.lua boot off`。在資料中心 #0、核電廠 #3、基地 #4 各自啟用後，往後重開機會開啟管理程式；#3/#4 的新版代理會記錄最後一次 `start`／`stop` 意圖並恢復監控。這**不會啟動核分裂反應爐、不會解除任何安全鎖**，核電廠程式更新仍需獨立確認。使用方法、安全檢查及實測界線見 [INSTALLER.md 的開機自動恢復](INSTALLER.md#開機自動恢復opt-in不會自動啟動反應爐)。
