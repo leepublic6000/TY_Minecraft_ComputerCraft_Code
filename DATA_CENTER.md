@@ -84,3 +84,55 @@ start 4
 - `update` 使用指定 GitHub 公開 `main` 分支的最新內容；建議確認預期版本後再操作。更新失敗應核對 `.bak` 和狀態，不要直接連續重試。
 
 參考：[CC:Tweaked Rednet](https://tweaked.cc/module/rednet.html)、[Multishell](https://tweaked.cc/module/multishell.html)、[Parallel](https://tweaked.cc/module/parallel.html)。
+
+## Pocket #2：隨身連回資料中心 #0（2026-10-24 新增）
+
+這是 **資料中心遠端管理**，不是直接遙控 Mekanism 反應爐。Pocket 透過 Ender Modem 把指令送到資料中心 #0，資料中心再轉送給既有的 `dc_agent.lua`。**核電廠 #3 和基地 #4 的代理程式不必重新安裝或修改。**
+
+### 唯一一次更新資料中心 #0
+
+舊版 `dc_center.lua` 尚未具備 Pocket 請求接收功能，因此第一次必須在 #0 的本機終端更新它。之後用 Pocket 就可管理 #3、#4，而不必在核電廠和基地之間移動。
+
+1. 在資料中心的 `dc>` 輸入 `exit`，離開舊版控制台（不要停止 #3/#4 的代理）。
+2. 在資料中心 CraftOS `>` 輸入：
+
+   ```text
+   wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/dc_center.lua dc_center_new.lua
+   ```
+
+3. 下載成功後，在 CraftOS `>` 輸入 `delete dc_center.lua`，再執行 `move dc_center_new.lua dc_center.lua`、`dc_center.lua`。請只在成功下載新檔之後才刪除舊檔。亦可先將舊版備份為其他檔名。
+
+### Pocket #2 下載管理客戶端
+
+在 Pocket 的 CraftOS `>`（非 `(lua)>`）輸入：
+
+```text
+wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/dc_remote.lua dc_remote.lua
+dc_remote.lua
+```
+
+啟動後看到 `pdc>` 即可下指令：
+
+```text
+nodes
+info 3
+status 3
+info 4
+update 4
+start 4
+stop 4
+restart 4
+exit
+```
+
+`update`、`start`、`stop`、`restart` 都要求輸入 `YES`（大小寫皆接受）。`status`、`info`、`nodes` 是查詢，不需確認。可管理的節點須已由資料中心配對、最近有心跳並且接受既有固定命令白名單；否則會回覆拒絕。**遠端控制不包含任意 Shell 指令、Lua 執行，亦不會繞過 #3 反應爐運轉中禁止停止監控的安全條件。**
+
+`dc_remote.lua` 只負責管理資料中心，與原本直接查看核電廠數據／核分裂操作的 `mek_pocket.lua` 是不同功能，可以分別在 Pocket 內啟動。Pocket 無須安裝 `dc_agent.lua` 才能遠端管理 #3/#4；資料中心的 `nodes` 若顯示 #2 `OFFLINE`，可能只是 Pocket 沒有啟動管理代理，而不是 Pocket 無法連資料中心。
+
+### 連線與安全限制
+
+- 首次更新 **資料中心 #0 本機** 無法省略：舊版程式沒有接收 Pocket 遠端管理請求的能力；不能只靠 Rednet 搜尋遠端執行任意指令。
+- 固定配對關係：資料中心 #0，只接受 Pocket #2 的遠端管理請求；核電廠 #3 與基地 #4 仍由現有資料中心代理接受既有白名單指令。
+- Rednet **沒有強式身分驗證或加密**。Pocket ID 白名單不是密碼學安全保證；只適用單人或可信任的私人伺服器。
+- 執行命令遇到 `NO ACK`、逾時或連線中斷時，**不能直接認定命令失敗或成功**，應先用 `info <id>` 確認狀態再決定是否重試。
+- 資料中心、核電廠、基地電腦所在區塊仍須載入；Ender Modem 不會強制載入區塊。
