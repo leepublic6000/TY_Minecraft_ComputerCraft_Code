@@ -10,9 +10,9 @@ ATM10 8.3（Minecraft / Mekanism / CC:Tweaked）核分裂反應爐與工業渦�
 | --- | ---: | --- |
 | 核電廠 Advanced Computer | **3** | `back` = `fissionReactorLogicAdapter`；`turbineValve_0` = `turbineValve`；`top` = Ender Modem（使用者表示） |
 | 基地 Advanced Computer | **4** | `left` = 71×33 唯讀 Monitor；`right` = 29×33 控制 Monitor；`top` = Ender Modem |
-| 隨身 Pocket Computer | **2** | `back` = Modem 升級模組 |
+| 隨身 Pocket Computer | **6** | `back` = Modem 升級模組 |
 
-核電廠已實測反應爐與渦輪都 `isFormed() = true`，渦輪 `getProductionRate()` 曾回傳 `62`（發電能源單位需依遊戲設定核實）。Pocket #2 與基地 #4 已分別使用 `rednet.lookup()` 找到核電廠 #3，基本通訊通過。這些測試**不等於新監控程式已在遊戲中跑通**。
+核電廠已實測反應爐與渦輪都 `isFormed() = true`，渦輪 `getProductionRate()` 曾回傳 `62`（發電能源單位需依遊戲設定核實）。舊 Pocket #2（已遺失）與基地 #4 曾分別使用 `rednet.lookup()` 找到核電廠 #3；新 Pocket #6 的通訊仍待遊戲內驗證。這些測試**不等於新監控程式已在遊戲中跑通**。
 
 ## 檔案用途
 
@@ -20,7 +20,7 @@ ATM10 8.3（Minecraft / Mekanism / CC:Tweaked）核分裂反應爐與工業渦�
 | --- | --- | --- |
 | `mek_send.lua` | 核電廠 #3 | 動態擷取反應爐／渦輪所有公開、免參數、唯讀 `get*`／`is*`／`has*`／`can*` 方法；每秒廣播資料；對允許的手動指令檢查參數與權限並讀回結果 |
 | `mek_watch.lua` | 基地 #4 | 左側 71×33 唯讀完整資料分頁；右側 29×33 觸控控制；輸出最新完整快照 `mek_latest.json` |
-| `mek_pocket.lua` | Pocket #2 | 隨身完整資料分頁、狀態總覽及手動控制（鍵盤與部分螢幕觸控） |
+| `mek_pocket.lua` | Pocket #6 | 隨身完整資料分頁、狀態總覽及手動控制（鍵盤與部分螢幕觸控） |
 
 **資料範圍**：只包含 `Fission Reactor Logic Adapter` / `Industrial Turbine Valve` 透過 CC:Tweaked **實際公開**的免參數查詢方法；查詢失敗保留在 `errors`，所有方法名稱（含不能直接呼叫的 setter）保留在 `methods`。不會假裝取得其他設備（例如鍋爐、儲能矩陣）的數據。溫度 `getTemperature` 從 Kelvin 轉成攝氏（畫面使用 `C` 字元）；熱容量／溫差類數值不做錯誤換算。
 
@@ -42,7 +42,7 @@ wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_
 mek_watch.lua
 ```
 
-**第三台：Pocket #2**
+**第三台：Pocket #6**
 
 ```text
 wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/mek_pocket.lua mek_pocket.lua
@@ -69,7 +69,7 @@ wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_
 
 ```lua
 trusted_base_id = 4,
-trusted_pocket_id = 2,
+trusted_pocket_id = 6,
 max_allowed_burn_rate = nil,
 allow_remote_scram = false,
 allow_remote_activate = false,
@@ -79,7 +79,7 @@ allow_remote_turbine_mode = false,
 
 要開放哪一種手動操作，必須由你在核電廠 #3 的 `mek_send.lua` 中**逐項明確開啟**，並重啟該程式：
 
-- `allow_remote_scram = true`：允許 #4、#2 發出 SCRAM 停機指令；基地紅色按鈕點一次，Pocket 必須鍵入 `SCRAM` 確認。
+- `allow_remote_scram = true`：允許 #4、#6 發出 SCRAM 停機指令；基地紅色按鈕點一次，Pocket 必須鍵入 `SCRAM` 確認。
 - `max_allowed_burn_rate = <已實測安全上限>`：才允許 `setBurnRate(rate)`，且程式會再與 `getMaxBurnRate()` 的結構上限比較。**不可以把結構最高燃燒速率當成安全設定值**。
 - `allow_remote_activate = true`：允許人工遠端啟動；使用前必須確認冷卻／水回收及獨立安全停機機制正常。
 - `allow_remote_turbine_mode = true`：允許切換 `IDLE`／`DUMPING_EXCESS`／`DUMPING`；排出的蒸氣無法回收到閉環水冷系統。
@@ -115,4 +115,4 @@ allow_remote_turbine_mode = false,
 
 完整部署方式與安全限制請見 [DATA_CENTER.md](DATA_CENTER.md)。
 
-Pocket #2 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0，直接執行 `nodes`、`info 3`、`update 3`、`start 3` 等管理命令。資料中心僅需一次更新 `dc_center.lua`，既有 #3、#4 代理不需重裝；詳見 [DATA_CENTER.md](DATA_CENTER.md)。
+Pocket #6 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0，直接執行 `nodes`、`info 3`、`update 3`、`start 3` 等管理命令。資料中心僅需一次更新 `dc_center.lua`，既有 #3、#4 代理不需重裝；詳見 [DATA_CENTER.md](DATA_CENTER.md)。
