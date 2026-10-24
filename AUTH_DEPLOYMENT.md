@@ -1,6 +1,6 @@
 # TY 資料中心：玩家登入與裝置信任整合規格
 
-**適用**：ATM10 8.3／CC:Tweaked／Advanced Peripherals 0.8；資料中心 #0、核電廠 #3、基地 #4、Pocket #6。
+**適用**：Minecraft 世界內的 ATM10 8.3／CC:Tweaked／Advanced Peripherals 0.8；資料中心 #0、核電廠 #3、基地 #4、Pocket #6。**僅處理遊戲內虛擬電腦的程式及周邊設備；不管理、檢查或修改雲端主機與 Minecraft 伺服器設定。**
 
 **重要：本文件為實作與驗收規格，不代表登入驗證已啟用。** 現有的 `dc_center.lua`、`dc_remote.lua`、`dc_shell_host.lua` 等仍按既有管理機制運作。本輪不更動遠端指令授權，避免在 Chat Box 尚未可用時造成鎖死或認證繞過。
 
@@ -8,9 +8,9 @@
 
 在資料中心 #0 執行 `peripheral.find("chat_box") ~= nil` 回傳 `false`，目前**無法接收玩家聊天 UUID**。請先放置 Advanced Peripherals **Chat Box** 緊貼電腦或以 Wired Modem、Networking Cable 連接，並確認 Wired Modem 已啟用 peripheral。
 
-安裝後在 #0 執行 `dc_chat_probe.lua`；玩家於聊天輸入 `$typrobe`。預期主控台出現 `Hidden event OK`，指定玩家收到私人回覆。此階段 **不會啟用登入功能**。若遙遠位置測試收不到事件，先核查 Chat Box 偵測範圍／相關伺服器設定，不以近距離通過推論全地圖可用。
+安裝後在 #0 執行 `dc_chat_probe.lua`；玩家於聊天輸入 `$typrobe`。預期主控台出現 `Hidden event OK`，指定玩家收到私人回覆。此階段 **不會啟用登入功能**。若遙遠位置測試收不到事件，先確認遊戲內 Chat Box 能否接收該訊息、周邊連線及程式是否持續執行，不以近距離通過推論全地圖可用。
 
-同時須在實際雲端伺服器的 `server.properties` 檢查 `online-mode=true` 及 `white-list=true`；公開網路上使用白名單 **不等於** Minecraft 帳號已驗證。若採用 Proxy，另核查安全的玩家 UUID forwarding。這些值無法由 CraftOS 的 `peripheral.find` 判定。
+本專案將 Chat Box 事件提供的玩家 UUID 當成**遊戲內事件資料**，不聲稱能獨立驗證玩家在遊戲外的真實身分。資料中心僅驗證事件欄位、登入挑戰、裝置憑證及授權；其他環境的設定不屬於本專案。
 
 ## 完整驗證流程（待整合實作）
 
@@ -24,9 +24,9 @@
 ## 上線門檻
 
 - Chat Box 接線、隱藏訊息及指定玩家私訊、跨地點事件收取均經你的伺服器實測。
-- `online-mode` 和白名單經雲端伺服器設定原文確認；玩家 UUID 與名稱來源可信。
+- 資料中心只使用遊戲內 Chat Box 事件回傳的 UUID 與玩家名稱；缺少身分欄位或無法關聯到登入挑戰時一律拒絕，不聲稱已驗證遊戲外身分。
 - 持久化裝置憑證／撤銷狀態、重開機、速率限制、五次錯誤、兩分鐘失效、2FA 離線情況與未授權操作均通過測試。
 - 中心 `dc_center.lua` 對所有管理指令與 Shell 訊息實施統一驗證，沒有舊版直通繞過；`mek_send.lua` 等直接 Rednet 控制管道另外核對安全邊界。
 - 核電廠保留原本的獨立安全保護；認證程式不能在未測試的情況下修改啟停、SCRAM 或燃燒速率設定。
 
-官方參考：[Advanced Peripherals 0.8 Chat Box](https://docs.advanced-peripherals.de/0.8/peripherals/chat_box/)、[CC:Tweaked peripherals](https://tweaked.cc/module/peripheral.html)、[Minecraft server.properties](https://minecraft.wiki/w/Server.properties)。
+官方參考：[Advanced Peripherals 0.8 Chat Box](https://docs.advanced-peripherals.de/0.8/peripherals/chat_box/)、[CC:Tweaked peripherals](https://tweaked.cc/module/peripheral.html)。
