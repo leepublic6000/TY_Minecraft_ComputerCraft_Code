@@ -9,9 +9,9 @@
 | 資料中心 Advanced Computer | 由你在遊戲內確認 | `dc_center.lua`：集中查看節點與發送受限指令 |
 | 核電廠 Advanced Computer | 3 | `dc_agent.lua`：管理 `mek_send.lua` |
 | 基地 Advanced Computer | 4 | `dc_agent.lua`：管理 `mek_watch.lua` |
-| Pocket Computer | 2 | 可選安裝 `dc_agent.lua`：只回報在線與代理狀態；`mek_pocket.lua` 照常獨立使用 |
+| Pocket Computer | 6 | 可選安裝 `dc_agent.lua`：只回報在線與代理狀態；`mek_pocket.lua` 照常獨立使用 |
 
-由於你已使用 Ender Modem，反應爐資料可以直接由 #3 發往 #4 與 Pocket #2，**資料中心不是必須經過的網路中繼站**；它負責管理層（控制台／節點代理）。這可以避免資料中心故障時連唯讀監控都一同中斷。
+由於你已使用 Ender Modem，反應爐資料可以直接由 #3 發往 #4 與 Pocket #6，**資料中心不是必須經過的網路中繼站**；它負責管理層（控制台／節點代理）。這可以避免資料中心故障時連唯讀監控都一同中斷。
 
 ## 1. 資料中心：先安裝主控台
 
@@ -40,7 +40,7 @@ bg dc_agent.lua
 
 **注意**：要讓資料中心管理 `mek_send.lua` / `mek_watch.lua`，請停止原先自行在其他分頁啟動的同名程式，再交給 `dc_agent.lua` 管理，避免同一電腦執行兩份監控程式。
 
-Pocket #2 不必先安裝代理，原本的 `mek_pocket.lua` 仍能直接監控核電廠；若要在資料中心查看 Pocket 在線狀態，可以選擇安裝代理，但需讓它在 Pocket 開機／區塊載入期間持續運作。
+Pocket #6 不必先安裝代理，原本的 `mek_pocket.lua` 仍能直接監控核電廠；若要在資料中心查看 Pocket 在線狀態，可以選擇安裝代理，但需讓它在 Pocket 開機／區塊載入期間持續運作。
 
 ## 3. 資料中心指令
 
@@ -85,7 +85,7 @@ start 4
 
 參考：[CC:Tweaked Rednet](https://tweaked.cc/module/rednet.html)、[Multishell](https://tweaked.cc/module/multishell.html)、[Parallel](https://tweaked.cc/module/parallel.html)。
 
-## Pocket #2：隨身連回資料中心 #0（2026-10-24 新增）
+## Pocket #6：隨身連回資料中心 #0（2026-10-24 新增）
 
 這是 **資料中心遠端管理**，不是直接遙控 Mekanism 反應爐。Pocket 透過 Ender Modem 把指令送到資料中心 #0，資料中心再轉送給既有的 `dc_agent.lua`。**核電廠 #3 和基地 #4 的代理程式不必重新安裝或修改。**
 
@@ -102,7 +102,7 @@ start 4
 
 3. 下載成功後，在 CraftOS `>` 依序執行 `move dc_center.lua dc_center_old.lua`、`move dc_center_new.lua dc_center.lua`、`dc_center.lua`。這會保留舊版作為備份；若 `dc_center_old.lua` 已存在，請換用尚未使用的備份名稱。
 
-### Pocket #2 下載管理客戶端
+### Pocket #6 下載管理客戶端
 
 在 Pocket 的 CraftOS `>`（非 `(lua)>`）輸入：
 
@@ -132,7 +132,9 @@ exit
 ### 連線與安全限制
 
 - 首次更新 **資料中心 #0 本機** 無法省略：舊版程式沒有接收 Pocket 遠端管理請求的能力；不能只靠 Rednet 搜尋遠端執行任意指令。
-- 固定配對關係：資料中心 #0，只接受 Pocket #2 的遠端管理請求；核電廠 #3 與基地 #4 仍由現有資料中心代理接受既有白名單指令。
+- 固定配對關係：資料中心 #0，只接受 Pocket #6 的遠端管理請求；核電廠 #3 與基地 #4 仍由現有資料中心代理接受既有白名單指令。
 - Rednet **沒有強式身分驗證或加密**。Pocket ID 白名單不是密碼學安全保證；只適用單人或可信任的私人伺服器。
 - 執行命令遇到 `NO ACK`、逾時或連線中斷時，**不能直接認定命令失敗或成功**，應先用 `info <id>` 確認狀態再決定是否重試。
 - 資料中心、核電廠、基地電腦所在區塊仍須載入；Ender Modem 不會強制載入區塊。
+
+> 2026-10-24 平板更換：舊 Pocket #2 已遺失，新 Pocket #6 取代其遠端管理權限。新程式必須更新並重新啟動在資料中心 #0 的 `dc_center.lua` 才會生效；要從 Pocket 直接操作核分裂反應爐，還須於安全條件允許時更新核電廠 #3 的 `mek_send.lua`。GitHub 原始碼更新不等於遊戲內正在執行的程式已更新。
