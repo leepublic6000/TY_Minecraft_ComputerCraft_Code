@@ -233,7 +233,10 @@ local function onShellClient(client, packet)
             if type(packet.event)~="string" or #packet.event>20 then return end
         end
     end
-    local sent=rednet.send(target,packet,SHELL_HOST)
+    -- Never forward the bearer session credential to the remote host.
+    local forwarded={}
+    for k,v in pairs(packet) do if k~="auth" then forwarded[k]=v end end
+    local sent=rednet.send(target,forwarded,SHELL_HOST)
     if not sent then
         terminalSessions[target]=nil
         shellError(client,sid,target,"Could not send to node")
