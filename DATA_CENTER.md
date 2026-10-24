@@ -100,7 +100,7 @@ start 4
    wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/dc_center.lua dc_center_new.lua
    ```
 
-3. 下載成功後，在 CraftOS `>` 輸入 `delete dc_center.lua`，再執行 `move dc_center_new.lua dc_center.lua`、`dc_center.lua`。請只在成功下載新檔之後才刪除舊檔。亦可先將舊版備份為其他檔名。
+3. 下載成功後，在 CraftOS `>` 依序執行 `move dc_center.lua dc_center_old.lua`、`move dc_center_new.lua dc_center.lua`、`dc_center.lua`。這會保留舊版作為備份；若 `dc_center_old.lua` 已存在，請換用尚未使用的備份名稱。
 
 ### Pocket #2 下載管理客戶端
 
