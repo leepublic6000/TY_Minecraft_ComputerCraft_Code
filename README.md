@@ -114,3 +114,5 @@ allow_remote_turbine_mode = false,
 資料中心的 Advanced Computer 可以使用 `dc_center.lua` 管理節點，並以 `dc_agent.lua` 在核電廠 #3、基地 #4 回報狀態與接收允許的啟動、停止、重啟及 GitHub 更新命令。這是固定白名單管理，不是任意遠端 Shell。首次安裝代理及本機配對仍須在目標電腦進行。
 
 完整部署方式與安全限制請見 [DATA_CENTER.md](DATA_CENTER.md)。
+
+Pocket #2 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0，直接執行 `nodes`、`info 3`、`update 3`、`start 3` 等管理命令。資料中心僅需一次更新 `dc_center.lua`，既有 #3、#4 代理不需重裝；詳見 [DATA_CENTER.md](DATA_CENTER.md)。
