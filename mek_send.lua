@@ -8,6 +8,7 @@ local CFG = {
     trusted_base_id = 4,          -- Verified base computer ID
     trusted_pocket_id = 2,        -- Verified Advanced Pocket Computer ID
     max_allowed_burn_rate = nil,  -- REQUIRED for setBurnRate: your VERIFIED safe limit (mB/t)
+    allow_remote_scram = false, -- Explicitly enable only after verifying safety controls
     allow_remote_activate = false,
     allow_remote_logic_mode = false,
     allow_remote_turbine_mode = false,
@@ -143,6 +144,7 @@ local function status()
             paired=type(CFG.trusted_base_id) == "number" or type(CFG.trusted_pocket_id) == "number",
             controllerIds={ CFG.trusted_base_id, CFG.trusted_pocket_id },
             burnRateCap=CFG.max_allowed_burn_rate,
+            scram=CFG.allow_remote_scram,
             activate=CFG.allow_remote_activate,
             logicMode=CFG.allow_remote_logic_mode,
             turbineMode=CFG.allow_remote_turbine_mode,
@@ -172,6 +174,7 @@ local function commandResult(request)
 
     local method, readback, wanted
     if action == "scram" then
+        if not CFG.allow_remote_scram then return false, "Remote SCRAM locked at plant" end
         method, readback, wanted = "scram", "getStatus", false
     elseif action == "activate" then
         if not CFG.allow_remote_activate then return false, "Remote activation locked at plant" end
