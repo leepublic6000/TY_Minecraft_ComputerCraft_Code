@@ -3,6 +3,7 @@
 -- No SSH encryption/authentication: trusted private worlds ONLY.
 local args={...}
 local target=tonumber(args[1])
+local authToken=args[2]
 assert(target and target==math.floor(target) and (target==0 or target==3 or target==4),
     "Usage: dc_shell_client.lua <0|3|4>")
 local center=0
@@ -32,7 +33,7 @@ local function openRadio()
     error("No wireless / Ender Modem on Pocket")
 end
 local function send(packet)
-    packet.v=1;packet.sid=sid;packet.target=target
+    packet.v=1;packet.sid=sid;packet.target=target;packet.auth=authToken
     return rednet.send(center,packet,outgoing)
 end
 local function writeAt(x,y,msg,color)
