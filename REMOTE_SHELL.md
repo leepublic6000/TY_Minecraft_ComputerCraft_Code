@@ -1,6 +1,6 @@
 # TY 完整遠端 Shell（ATM10 8.3／CC:Tweaked）
 
-本功能針對現有的資料中心 #0、基地 #4、核電廠 #3、Pocket #6，提供類似 SSH 的 **互動式 CraftOS 終端**：可在 Pocket 上使用 `ls`、`cd`、`edit`、`ty.lua update`、執行 Lua，以及管理目標電腦檔案。它是目標電腦內的另一個 Shell 工作階段，不是畫面截取 Minecraft 本身、也不是強制接管原有監控分頁。
+本功能針對現有的資料中心 #0、基地 #4、核電廠 #3、Pocket #6，提供類似 SSH 的 **互動式 CraftOS 終端**：可在 Pocket 上使用 `ls`、`cd`、`edit`、`ty.lua update <檔名>`、執行 Lua，以及管理目標電腦檔案。它是目標電腦內的另一個 Shell 工作階段，不是畫面截取 Minecraft 本身、也不是強制接管原有監控分頁。
 
 **安全前提：本系統的 Rednet 沒有加密或密碼學來源驗證。它具有執行任意程式的權限，僅可使用於你自己控制的單人世界／完全可信任的私人伺服器。若伺服器有不可信任的玩家能放置 ComputerCraft 電腦，請不要啟用。**
 
@@ -29,7 +29,7 @@ Pocket #6 － Rednet －> 資料中心 #0 本身的獨立 Shell（目標 #0）
 在管理主控台 `dc>` 輸入 `exit` 退出舊版；切至 CraftOS `>`：
 
 ```text
-ty.lua update
+ty.lua update all
 ty.lua install
 ```
 
@@ -55,7 +55,7 @@ bg dc_center.lua
 在 CraftOS `>`：
 
 ```text
-ty.lua update
+ty.lua update all
 ty.lua install
 dc_remote.lua
 ```
@@ -83,7 +83,7 @@ edit startup.lua
 **必須先在基地本機執行一次**，因為舊版 `dc_agent.lua` 並沒有執行任意命令或安裝其他管理服務的能力。可利用 Windows 檔案拖曳方式，不必在遊戲輸入長網址：
 
 ```text
-ty.lua update
+ty.lua update all
 ty.lua install
 dc_shell_host.lua enable
 bg dc_shell_host.lua
@@ -91,13 +91,13 @@ bg dc_shell_host.lua
 
 在 `enable` 提示輸入大寫 `ENABLE`。這項設定會產生 `startup/ty_shell_host.lua`，使往後開機自動執行遠端 Shell 服務。它與原本的 `startup/ty_managed.lua`、`dc_agent.lua` 是**不同分頁**，不會再啟動一份監控程式。
 
-完成首次本機安裝後，從 Pocket #6 `pdc>` 輸入 `shell 4` 就能遠端操作基地電腦，使用 `ty.lua update`、`ty.lua boot on` 等本來只會在本機執行的命令。這才是完整遠端更新的主要用途。
+完成首次本機安裝後，從 Pocket #6 `pdc>` 輸入 `shell 4` 就能遠端操作基地電腦，使用 `ty.lua update <檔名>`、`ty.lua update all`、`ty.lua boot on` 等本來只會在本機執行的命令。這才是完整遠端更新的主要用途。
 
 ### D. 核電廠 #3（安全維護時才開放）
 
 **核分裂反應爐運轉中不開放完整 Shell。** 原因：完整 Shell 可直接呼叫 Mekanism API，繞過 `mek_send.lua` 的燃燒速率與啟停控制鎖定。主機 `dc_shell_host.lua` 在開啟工作階段時要求反應爐 `getStatus() == false`，運作期間也會持續檢查；一旦反應爐開始運轉就關閉遠端 Shell。這項檢查不是核電廠本身的安全聯鎖，也無法保證使用者在遠端 Shell 內執行的每一條指令都安全。
 
-未安排核電廠維護時，**不必做這一步**。若已停止反應爐並確認實際冷卻與安全機制正常，可將 `dc_shell_host.lua` 從 GitHub 下載到核電廠（不要為此強行使用 `ty.lua update` 覆蓋現有 `mek_send.lua`），然後本機輸入：
+未安排核電廠維護時，**不必做這一步**。若已停止反應爐並確認實際冷卻與安全機制正常，可將 `dc_shell_host.lua` 從 GitHub 下載到核電廠（不要為此使用 `ty.lua update all` 覆蓋現有 `mek_send.lua`；可用新版安裝器 `ty.lua update dc_shell_host.lua` 單獨更新該檔案），然後本機輸入：
 
 ```text
 dc_shell_host.lua enable
