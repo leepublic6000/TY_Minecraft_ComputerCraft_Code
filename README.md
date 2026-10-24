@@ -108,3 +108,9 @@ allow_remote_turbine_mode = false,
 - [CC:Tweaked peripheral API](https://tweaked.cc/module/peripheral.html)
 - [CC:Tweaked rednet API](https://tweaked.cc/module/rednet.html)
 - [CC:Tweaked Pocket API](https://tweaked.cc/module/pocket.html)
+
+## 集中式資料中心（新增）
+
+資料中心的 Advanced Computer 可以使用 `dc_center.lua` 管理節點，並以 `dc_agent.lua` 在核電廠 #3、基地 #4 回報狀態與接收允許的啟動、停止、重啟及 GitHub 更新命令。這是固定白名單管理，不是任意遠端 Shell。首次安裝代理及本機配對仍須在目標電腦進行。
+
+完整部署方式與安全限制請見 [DATA_CENTER.md](DATA_CENTER.md)。
