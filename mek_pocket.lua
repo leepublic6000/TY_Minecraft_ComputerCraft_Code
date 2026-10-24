@@ -1,5 +1,5 @@
 -- TY Minecraft ComputerCraft Code / ATM10 8.3
--- POCKET COMPUTER #2: read the full reactor/turbine telemetry and send
+-- POCKET COMPUTER #6: read the full reactor/turbine telemetry and send
 -- optional manual commands to plant #3. No automatic reactor control.
 
 local CFG = {
