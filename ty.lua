@@ -64,6 +64,21 @@ local function localFiles()
     names[#names+1] = "ty.lua" -- Keep the updater itself up to date.
     return names
 end
+local function printUpdateTargets()
+    if not role then
+        say("No installation profile for computer #" .. ID)
+        return
+    end
+    say("Choose a local program to update on #" .. ID .. ":")
+    for _, name in ipairs(localFiles()) do
+        print("  ty.lua update " .. name)
+    end
+    print("  ty.lua update all  - ALL files on this computer")
+    print("Only the named program is changed; no running service is restarted.")
+    if ID == 3 then
+        say("Reactor must be STOPPED for mek_send.lua or all-file updates.")
+    end
+end
 local function printLocal()
     if not role then
         say("Unknown computer #" .. ID .. "; no role selected. No files changed.")
@@ -98,12 +113,24 @@ local function cleanStaged(pending)
         pcall(safeDelete, item.name .. ".tybak_new")
     end
 end
-local function localUpdate(kind)
+local function localUpdate(kind, requestedFile)
     if not role then
         say("No installation profile for computer #" .. ID)
         return false
     end
     local names = localFiles()
+    if requestedFile and requestedFile ~= "all" then
+        local allowed = false
+        for _, name in ipairs(names) do
+            if name == requestedFile then allowed = true; break end
+        end
+        if not allowed then
+            say("ABORT: " .. requestedFile .. " is not an approved file for computer #" .. ID)
+            say("Run ty.lua update to list available files. No files changed.")
+            return false
+        end
+        names = { requestedFile }
+    end
     say(kind .. " on #" .. ID .. " (" .. role.name .. ")")
     local downloads = {}
     for _, name in ipairs(names) do
@@ -128,7 +155,9 @@ local function localUpdate(kind)
         say("" .. #downloads .. " file(s) need updating; check made no changes.")
         return true
     end
-    if ID == 3 then
+    -- Only single-file, non-plant updates may proceed while #3 is running.
+    -- Full and mek_send.lua updates retain the existing fail-closed reactor guard.
+    if ID == 3 and (not requestedFile or requestedFile == "all" or requestedFile == "mek_send.lua") then
         local safe, reason = plantIsSafe()
         if not safe then
             say("ABORT: " .. reason .. ". No nuclear code was changed.")
@@ -518,9 +547,11 @@ local function help()
     say("One updater for ATM10 CC:Tweaked computers")
     print("Computer: #" .. ID .. "; role: " .. (role and role.name or "UNKNOWN"))
     print("  ty.lua status   - files installed on this computer")
-    print("  ty.lua check    - compare with GitHub without writing")
+    print("  ty.lua check [file] - compare a file or all; no writing")
     print("  ty.lua install  - install role files and updater")
-    print("  ty.lua update   - update role files and updater")
+    print("  ty.lua update   - list available local update choices")
+    print("  ty.lua update <file> - update ONE approved local file")
+    print("  ty.lua update all - update ALL local role files")
     print("  ty.lua fleet   - centre #0 safely remote-update base #4")
     print("  ty.lua all     - centre #0 local update + remote base update")
     print("  ty.lua boot status - inspect managed startup policy")
@@ -536,15 +567,23 @@ elseif ACTION == "status" then
 elseif ACTION == "boot" then
     bootAction(argv[2])
 elseif ACTION == "check" then
-    localUpdate("check")
-elseif ACTION == "install" or ACTION == "update" then
-    localUpdate(ACTION)
+    localUpdate("check", argv[2])
+elseif ACTION == "install" then
+    localUpdate("install")
+elseif ACTION == "update" then
+    if argv[3] then
+        say("Usage: ty.lua update <file|all>")
+    elseif argv[2] then
+        localUpdate("update", argv[2])
+    else
+        printUpdateTargets()
+    end
 elseif ACTION == "fleet" then
     fleet()
 elseif ACTION == "all" then
     if ID ~= 0 then
         say("Unified centre update is only available on computer #0")
-    elseif localUpdate("update") then
+    elseif localUpdate("update", "all") then
         fleet()
     else
         say("Remote update skipped because local update did not finish")
