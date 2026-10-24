@@ -1,5 +1,5 @@
 -- TY Minecraft ComputerCraft Code - Pocket Data Centre Remote
--- Pocket #2 talks to data centre #0, which manages paired node agents.
+-- Pocket #6 talks to data centre #0, which manages paired node agents.
 -- All actions are fixed allowlisted commands; this is NOT an arbitrary SSH shell.
 -- Rednet does not authenticate sender IDs. Use only on trusted game networks.
 
