@@ -46,8 +46,38 @@ elseif args[1] ~= nil then
 end
 
 local centerId = loadPair()
+-- TY_BOOT_RESUME_V1: only the TY-managed startup hook enables durable service state.
+local BOOT_HOOK = "startup/ty_managed.lua"
+local BOOT_DESIRED = "ty_boot_service.flag"
+local function bootEnabled()
+    if not fs.exists(BOOT_HOOK) or fs.isDir(BOOT_HOOK) then return false end
+    local handle = fs.open(BOOT_HOOK, "r")
+    if not handle then return false end
+    local prefix = handle.readLine()
+    handle.close()
+    return prefix == "-- TY_BOOT_MANAGED_V1"
+end
+local function loadDesired()
+    if not bootEnabled() or not fs.exists(BOOT_DESIRED) then return false end
+    local handle = fs.open(BOOT_DESIRED, "r")
+    if not handle then return false end
+    local value = handle.readAll()
+    handle.close()
+    return value:match("^%s*1%s*$") ~= nil
+end
+local function saveDesired(value)
+    if not bootEnabled() then return true end
+    local handle = fs.open(BOOT_DESIRED, "w")
+    if not handle then return false, "Cannot persist boot service state" end
+    local ok, err = pcall(function()
+        handle.write(value and "1\n" or "0\n")
+        handle.close()
+    end)
+    if not ok then return false, tostring(err) end
+    return true
+end
 local state = "STOPPED"
-local wanted = false
+local wanted = loadDesired()
 local restarting = false
 local lastError = nil
 local launchedAt = nil
@@ -151,6 +181,8 @@ local function handleCommand(sender, packet)
         elseif not fs.exists(profile.file) then
             respond(sender, req, false, "File missing; use update first")
         else
+            local ok, err = saveDesired(true)
+            if not ok then respond(sender, req, false, err); return end
             wanted = true
             lastError = nil
             os.queueEvent("ty_dc_wake")
@@ -159,6 +191,8 @@ local function handleCommand(sender, packet)
     elseif action == "stop" or action == "restart" then
         if not wanted and state ~= "RUNNING" then
             if action == "restart" and fs.exists(profile.file) then
+                local ok, err = saveDesired(true)
+                if not ok then respond(sender, req, false, err); return end
                 wanted = true
                 os.queueEvent("ty_dc_wake")
                 respond(sender, req, true, "Service not running; start requested")
@@ -169,6 +203,8 @@ local function handleCommand(sender, packet)
         end
         local safe, reason = reactorSafeToInterrupt()
         if not safe then respond(sender, req, false, reason); return end
+        local ok, err = saveDesired(action == "restart")
+        if not ok then respond(sender, req, false, err); return end
         restarting = action == "restart"
         wanted = false
         os.queueEvent("ty_dc_stop")
@@ -198,6 +234,7 @@ local function service()
             if not file or not fs.exists(file) then
                 state = "ERROR"
                 lastError = "Approved program missing"
+                -- Keep the desired boot state: missing files may be restored later.
                 wanted = false
             else
                 state = "RUNNING"
@@ -214,6 +251,10 @@ local function service()
                 parallel.waitForAny(runApp, waitStop)
                 state = outcome and "ERROR" or "STOPPED"
                 lastError = outcome
+                -- A stopped/crashed app must not spin in an immediate retry loop.
+                -- Only an explicit restart request starts the app again.
+                -- Do not spin in a crash loop. Keep boot desire unless an
+                -- explicit STOP command already persisted the STOP state.
                 wanted = restarting
                 restarting = false
                 if wanted then os.queueEvent("ty_dc_wake") end
@@ -226,5 +267,6 @@ openWireless()
 print("TY Data Centre Agent | #" .. myId .. " / " .. profile.role)
 print("Pairing: " .. (centerId and ("#" .. centerId) or "NONE (monitor-only)"))
 print("Approved app: " .. tostring(profile.file))
+print("Boot resume: " .. (bootEnabled() and (wanted and "RUN" or "STOP") or "DISABLED"))
 print("Control is allowlisted; reactor safety interlock stays independent.")
 parallel.waitForAll(network, service)
