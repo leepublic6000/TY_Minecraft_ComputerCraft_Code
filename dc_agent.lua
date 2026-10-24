@@ -10,7 +10,7 @@ local REPO = "https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_Compu
 local APPS = {
     [3] = { role = "PLANT", file = "mek_send.lua" },
     [4] = { role = "BASE", file = "mek_watch.lua" },
-    [2] = { role = "POCKET", file = nil }, -- Pocket presence only. Pocket UI remains independent.
+    [6] = { role = "POCKET", file = nil }, -- Pocket presence only. Pocket UI remains independent.
 }
 local myId = os.getComputerID()
 local profile = APPS[myId] or { role = "GENERAL", file = nil }
