@@ -4,6 +4,17 @@ ATM10 8.3（Minecraft / Mekanism / CC:Tweaked）核分裂反應爐與工業渦�
 
 > **狀態**：已核對 Mekanism 10.7 與 CC:Tweaked 官方 API；三個 Lua 檔案通過 Lua 語法檢查及模擬周邊／Rednet 整合測試。**尚未在玩家的 ATM10 8.3 遊戲世界中實際部署或測試所有操作。**
 
+## 統一安裝與更新（ty.lua）
+
+日後不需要每次手動貼 GitHub 長網址。使用一份 [`ty.lua`](ty.lua) 腳本，自動依電腦 ID 選取程式：資料中心 **#0**、核電廠 **#3**、基地 **#4**、Pocket **#6**。
+
+- 第一次安裝：從 [Raw ty.lua](https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/ty.lua) 下載檔案並拖進 CraftOS，輸入 `ty.lua install`。
+- 一般更新：輸入 `ty.lua update`，會先驗證下載內容、保留 `.tybak` 舊版，**不會自動重啟背景程式**。
+- 資料中心集中更新：在 **#0** 輸入 `ty.lua all`，更新資料中心本身，並透過既有管理代理遠端更新基地 **#4**。
+- 核電廠 **#3**：不參與批次自動更新；必須確認反應爐已安全停止後，才允許人工更新，原本安全參數不會默默被保留或猜測。
+
+[完整安裝說明與安全限制](INSTALLER.md)。現有 `dc_center.lua`、`dc_agent.lua` 的通訊協定與 Mekanism 監控程式未因這次新增安裝器而改動。
+
 ## 你的遊戲配置
 
 | 裝置 | 電腦 ID | 已確認接線／周邊 |
