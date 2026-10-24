@@ -131,3 +131,9 @@ Pocket #6 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0
 ### 電腦開機自動恢復（需手動啟用一次）
 
 最新版 `ty.lua` 新增 `ty.lua boot status`、`ty.lua boot on`、`ty.lua boot off`。在資料中心 #0、核電廠 #3、基地 #4 各自啟用後，往後重開機會開啟管理程式；#3/#4 的新版代理會記錄最後一次 `start`／`stop` 意圖並恢復監控。這**不會啟動核分裂反應爐、不會解除任何安全鎖**，核電廠程式更新仍需獨立確認。使用方法、安全檢查及實測界線見 [INSTALLER.md 的開機自動恢復](INSTALLER.md#開機自動恢復opt-in不會自動啟動反應爐)。
+
+## 完整遠端 CraftOS Shell（僅限可信任的私人伺服器）
+
+已加入 [`dc_shell_host.lua`](dc_shell_host.lua)（目標電腦端）、[`dc_shell_client.lua`](dc_shell_client.lua)（Pocket #6 端），並擴充 `dc_center.lua`、`dc_remote.lua`、`ty.lua`。從 Pocket #6 的 `pdc>` 可使用 `shell 4` 操作基地 #4 的獨立 CraftOS 終端；`shell 0` 需資料中心 #0 本機另行啟用 Host。核電廠 #3 預設不開放，只有停堆維護並本機確認後才能啟用。
+
+**完整 Shell 可執行任意 Lua／檔案管理指令，Rednet 並無加密或身分驗證，僅限完全可信任的私人世界。** 首次仍須在目標電腦本機執行 `dc_shell_host.lua enable` 並啟動 Host；安裝器不會自動替你開啟此權限，亦不會停止原有監控。安裝、更新與驗收流程詳見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
