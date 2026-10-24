@@ -11,6 +11,28 @@ local CHANGES = { update=true, start=true, stop=true, restart=true }
 local ACTIONS = { nodes=true, info=true, status=true, update=true,
                   start=true, stop=true, restart=true }
 local sequence = 0
+local AUTH_REQUEST="ty.auth.v1:request"
+local AUTH_REPLY="ty.auth.v1:reply"
+local CREDENTIAL="ty_device_key.json"
+local authSession=nil
+local authRequired=false
+local authSupported=false
+local currentUUID=nil
+local function savedCredential()
+    if not fs.exists(CREDENTIAL) then return nil end
+    local h=fs.open(CREDENTIAL,"r")
+    if not h then return nil end
+    local data=h.readAll();h.close()
+    local ok,obj=pcall(textutils.unserialiseJSON,data)
+    if ok and type(obj)=="table" and type(obj.secret)=="string" then return obj.secret end
+    return nil
+end
+local function saveCredential(secret)
+    local h=assert(fs.open(CREDENTIAL..".tmp","w"))
+    h.write(textutils.serialiseJSON({secret=secret,computer=os.getComputerID()}));h.close()
+    if fs.exists(CREDENTIAL) then fs.delete(CREDENTIAL) end
+    fs.move(CREDENTIAL..".tmp",CREDENTIAL)
+end
 
 local function connect()
     for _, name in ipairs(peripheral.getNames()) do
@@ -23,12 +45,55 @@ local function connect()
     error("No Wireless/Ender Modem on this Pocket Computer")
 end
 
+local function authCall(action, payload, timeout)
+    sequence=sequence+1
+    local rid=tostring(os.epoch("utc"))..":"..tostring(sequence)
+    local data={v=1,rid=rid,action=action,session=authSession}
+    for k,v in pairs(payload or {}) do data[k]=v end
+    if not rednet.send(CENTRE_ID,data,AUTH_REQUEST) then return nil,"No open modem" end
+    local deadline=os.clock()+(timeout or 5)
+    while os.clock()<deadline do
+        local sender,msg=rednet.receive(AUTH_REPLY,deadline-os.clock())
+        if sender==CENTRE_ID and type(msg)=="table" and msg.v==1 and msg.rid==rid then
+            return msg
+        end
+    end
+    return nil,"Auth centre not responding"
+end
+local function doLogin()
+    if not authSupported then print("Auth gateway unavailable; centre needs update");return false end
+    local begun,err=authCall("begin")
+    if not begun or not begun.ok then print("LOGIN: "..tostring(begun and begun.message or err));return false end
+    print("Type in Minecraft CHAT:")
+    print("$tylogin "..tostring(begun.challenge))
+    print("Wait for private code (or Pocket #6 2FA on other computers).")
+    write("Six-digit code > ")
+    local code=read() or ""
+    local verified,why=authCall("verify",{code=code})
+    if not verified or not verified.ok then
+        print("LOGIN FAILED: "..tostring(verified and verified.message or why));return false
+    end
+    authSession=verified.session
+    currentUUID=verified.uuid
+    print("Logged in as "..tostring(currentUUID):sub(-8).." / "..tostring(verified.role))
+    if os.getComputerID()==6 then
+        write("Trust Pocket #6 until revoked? YES/no > ")
+        if string.upper(read() or "") == "YES" then
+            local trusted,reason=authCall("trust")
+            if trusted and trusted.ok and trusted.secret then
+                saveCredential(trusted.secret)
+                print("Pocket trusted until $tyrevokeall in Minecraft chat")
+            else print("Trust failed: "..tostring(trusted and trusted.message or reason)) end
+        end
+    end
+    return true
+end
 local function callCentre(action, target, confirmed)
     sequence = sequence + 1
     local requestId = tostring(os.epoch("utc")) .. ":" .. tostring(sequence)
     local packet = {
         version=1, requestId=requestId,
-        action=action, target=target, confirmed=confirmed == true,
+        action=action, target=target, confirmed=confirmed == true, auth=authSession,
     }
     if not rednet.send(CENTRE_ID, packet, REQUEST) then
         return nil, "Cannot send: no open modem"
@@ -67,6 +132,9 @@ local function showInfo(data)
     if data.lastError then print("Error: " .. tostring(data.lastError)) end
 end
 local function help()
+    print("login          verify player via Chat Box + OTP")
+    print("auth           check current login status")
+    print("logout         end current login session")
     print("nodes          list all nodes")
     print("info <id>      show node status")
     print("status <id>    request fresh status")
@@ -82,6 +150,25 @@ end
 print("TY Pocket Data Centre Remote")
 print("Pocket #" .. os.getComputerID() .. " -> Centre #" .. CENTRE_ID)
 print("Modem: " .. connect())
+local config=authCall("config")
+if config and config.ok then
+    authSupported=true
+    authRequired=config.enabled==true
+    print("Player authentication: "..(authRequired and "REQUIRED" or "NOT YET ENABLED"))
+    if authRequired then
+        local secret=savedCredential()
+        if secret and os.getComputerID()==6 then
+            local res=authCall("resume",{secret=secret})
+            if res and res.ok then
+                authSession=res.session;currentUUID=res.uuid
+                print("Trusted device login restored")
+            end
+        end
+        if not authSession then print("Type 'login' to authenticate") end
+    end
+else
+    print("Auth gateway unavailable: LEGACY MODE, no verified player identity")
+end
 print("For approved programs only; no reactor control bypass")
 help()
 while true do
@@ -93,13 +180,22 @@ while true do
         break
     elseif action == "help" then
         help()
+    elseif action == "login" then
+        doLogin()
+    elseif action == "auth" then
+        local r=authCall("status")
+        print(r and r.message or "Auth centre unavailable")
+    elseif action == "logout" then
+        if authSession then authCall("logout") end
+        authSession=nil;currentUUID=nil
+        print("Logged out. Device trust (if selected) remains until $tyrevokeall.")
     elseif action == "shell" then
         local target = tonumber(arg)
         if target~=0 and target~=3 and target~=4 then
             print("Usage: shell <0|3|4>")
         elseif fs.exists("dc_shell_client.lua") then
             print("Remote shell is high-privilege; private worlds only.")
-            shell.run("dc_shell_client.lua", tostring(target))
+            shell.run("dc_shell_client.lua", tostring(target), authSession or "")
         else
             print("dc_shell_client.lua missing: run ty.lua install on Pocket")
         end
