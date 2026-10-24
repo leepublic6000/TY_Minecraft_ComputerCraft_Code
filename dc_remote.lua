@@ -70,6 +70,7 @@ local function help()
     print("nodes          list all nodes")
     print("info <id>      show node status")
     print("status <id>    request fresh status")
+    print("shell <id>     open full remote CraftOS terminal")
     print("update <id>    update node app")
     print("start <id>     start node app")
     print("stop <id>      stop node app")
@@ -92,6 +93,16 @@ while true do
         break
     elseif action == "help" then
         help()
+    elseif action == "shell" then
+        local target = tonumber(arg)
+        if target~=0 and target~=3 and target~=4 then
+            print("Usage: shell <0|3|4>")
+        elseif fs.exists("dc_shell_client.lua") then
+            print("Remote shell is high-privilege; private worlds only.")
+            shell.run("dc_shell_client.lua", tostring(target))
+        else
+            print("dc_shell_client.lua missing: run ty.lua install on Pocket")
+        end
     elseif action and ACTIONS[action] then
         local target = nil
         if action ~= "nodes" then
