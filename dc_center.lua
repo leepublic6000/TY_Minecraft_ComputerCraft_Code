@@ -6,11 +6,11 @@ local CMD = "ty.dc.v1:command"
 local REPLY = "ty.dc.v1:reply"
 local HOST = "ty.dc.v1:center"
 -- Pocket remote management uses its own protocol. Only the trusted, verified
--- Pocket #2 may call this gateway. Rednet IDs are NOT cryptographic identities.
+-- Pocket #6 may call this gateway. Rednet IDs are NOT cryptographic identities.
 local REMOTE_REQ = "ty.dc.v1:remote_request"
 local REMOTE_RESP = "ty.dc.v1:remote_response"
-local REMOTE_ALLOWED = { [2] = true }
-local known = { [2]="Pocket", [3]="Nuclear Plant", [4]="Base" }
+local REMOTE_ALLOWED = { [6] = true }
+local known = { [6]="Pocket", [3]="Nuclear Plant", [4]="Base" }
 local nodes = {}
 local pendingId, pendingTarget, pendingReply = nil, nil, nil
 local nonce = 0
@@ -259,7 +259,7 @@ local function help()
 end
 local function consoleLoop()
     print("TY Data Centre | Computer #" .. os.getComputerID())
-    print("Known: plant #3, base #4, pocket #2")
+    print("Known: plant #3, base #4, pocket #6")
     print("Nodes require dc_agent.lua and local pairing to accept controls.")
     help()
     while true do
