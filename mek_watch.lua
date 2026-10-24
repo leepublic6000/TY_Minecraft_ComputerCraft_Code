@@ -59,13 +59,39 @@ local function chooseMonitors()
     return left, right
 end
 
+-- CC:Tweaked can only scale text in 0.5 increments. Pick the largest readable
+-- scale that still has enough character cells for the responsive layouts.
+local function fitScale(mon, minWidth, minHeight)
+    local current = mon.getTextScale()
+    local width, height = mon.getSize()
+    local physicalW, physicalH = width * current, height * current
+    local best = 0.5
+    for step = 5, 1, -1 do
+        local candidate = step * 0.5
+        if math.floor(physicalW / candidate) >= minWidth
+            and math.floor(physicalH / candidate) >= minHeight then
+            best = candidate
+            break
+        end
+    end
+    if current ~= best then mon.setTextScale(best) end
+    width, height = mon.getSize()
+    -- The monitor's character rounding can differ from the estimate.
+    while best > 0.5 and (width < minWidth or height < minHeight) do
+        best = best - 0.5
+        mon.setTextScale(best)
+        width, height = mon.getSize()
+    end
+    return best
+end
+
 local data, control
 local latest, plantId, receivedAt
 local lastSaveAt = -math.huge
 local lastAck, ackAt, pendingCommand, confirmCandidate
 local view = "OVERVIEW"
 local page = 1
-local controlsPage = "REACTOR"
+local controlsPage = "CORE"
 local burnDraft, burnDirty = nil, false
 local logicDraft, logicDirty = nil, false
 local dataZones, controlZones = {}, {}
@@ -208,21 +234,55 @@ local function writeAt(mon, x,y,s,fg,bg)
     mon.write(tostring(s):sub(1,w-x+1))
     mon.setBackgroundColor(colors.black)
 end
-local function button(mon,zones,x,y,w,label,bg,action,enabled)
+local function button(mon,zones,x,y,w,label,bg,action,enabled,height)
     local W,H=mon.getSize()
     if y<1 or y>H or x>W then return end
-    x=math.max(1,x); w=math.min(w,W-x+1)
+    x=math.max(1,x)
+    w=math.min(w,W-x+1)
     if w<1 then return end
-    local str=tostring(label)
-    if #str>w then str=str:sub(1,w) end
+    local lastY=math.min(H,y+math.max(1,math.floor(height or 1))-1)
+    local background=enabled==false and colors.gray or (bg or colors.blue)
+    local foreground=enabled==false and colors.lightGray or colors.white
+    local blank=string.rep(" ",w)
+    for row=y,lastY do writeAt(mon,x,row,blank,foreground,background) end
+    local str=tostring(label):sub(1,w)
     local lead=math.floor((w-#str)/2)
-    writeAt(mon,x,y,string.rep(" ",lead)..str..string.rep(" ",w-lead-#str),
-        enabled==false and colors.lightGray or colors.white,
-        enabled==false and colors.gray or (bg or colors.blue))
+    local centerY=math.floor((y+lastY)/2)
+    writeAt(mon,x,centerY,string.rep(" ",lead)..str,foreground,background)
     if enabled~=false and action then
-        zones[#zones+1]={x1=x,x2=x+w-1,y=y,fn=action}
+        zones[#zones+1]={x1=x,x2=x+w-1,y1=y,y2=lastY,fn=action}
     end
 end
+
+local function sectionHeader(mon,x,y,width,label)
+    writeAt(mon,x,y,string.rep(" ",width),colors.white,colors.blue)
+    local cut=tostring(label):sub(1,width)
+    writeAt(mon,x+math.floor((width-#cut)/2),y,cut,colors.white,colors.blue)
+end
+
+local function cellText(mon,x,y,width,label,foreground)
+    if width<1 then return end
+    writeAt(mon,x,y,tostring(label):sub(1,width),foreground or colors.white)
+end
+
+local function fraction(kind,method)
+    local n=value(kind,method)
+    if type(n)~="number" or n~=n then return nil end
+    return math.max(0,math.min(1,n))
+end
+
+local function fractionText(n)
+    return n and (nfmt(n*100,1).."%") or "--"
+end
+
+local function progressBar(mon,x,y,width,n,activeColor)
+    if width<3 then return end
+    local inner=width-2
+    local filled=n and math.floor(n*inner+0.5) or 0
+    local bar="["..string.rep("=",filled)..string.rep("-",inner-filled).."]"
+    writeAt(mon,x,y,bar,n and (activeColor or colors.lime) or colors.gray)
+end
+
 local function wrappedRows(lines,width)
     local arr={}
     width=math.max(1,width)
@@ -237,36 +297,100 @@ end
 
 local function drawData()
     local m=data.monitor
-    m.setBackgroundColor(colors.black); m.clear()
+    m.setBackgroundColor(colors.black)
+    m.clear()
     dataZones={}
     local w,h=m.getSize()
-    writeAt(m,1,1,"TY / MEKANISM - COMPLETE TELEMETRY",colors.cyan)
-    local link=not latest and "WAITING" or (live() and "LIVE" or "STALE / OFFLINE")
-    writeAt(m,1,2,"LINK: "..link.."  Plant #"..tostring(plantId or "--").."  Fission+Turbine",
-        live() and colors.lime or colors.red)
-    local tabs={"OVERVIEW","REACTOR","TURBINE","ERRORS","METHODS"}
-    local x=1
-    for _,tab in ipairs(tabs) do
-        local this=tab
-        button(m,dataZones,x,3,#tab+2,tab,view==tab and colors.blue or colors.gray,function()
-            view=this; page=1
-        end,true)
-        x=x+#tab+3
+    local link=not latest and "WAIT" or (live() and "LIVE" or "OFFLINE")
+    writeAt(m,1,1,string.rep(" ",w),colors.white,colors.blue)
+    writeAt(m,2,1,"TY  /  MEKANISM DASHBOARD",colors.white,colors.blue)
+    writeAt(m,1,2,string.rep(" ",w),colors.lightGray,colors.gray)
+    writeAt(m,2,2,"PLANT #"..tostring(plantId or CFG.plant_id).."   LINK "..link,
+        live() and colors.lime or colors.orange,colors.gray)
+
+    local tabs={
+        {"HOME","OVERVIEW"},{"CORE","REACTOR"},{"TURB","TURBINE"},
+        {"ERROR","ERRORS"},{"API","METHODS"},
+    }
+    for index,item in ipairs(tabs) do
+        local x=1+math.floor((index-1)*w/#tabs)
+        local nextX=math.floor(index*w/#tabs)+1
+        local tab=item[2]
+        button(m,dataZones,x,3,nextX-x,item[1],
+            view==tab and colors.blue or colors.gray,
+            function() view=tab; page=1 end,true)
     end
-    local body=wrappedRows(linesForView(),w)
+
+    local canShowCards=view=="OVERVIEW" and w>=34 and h>=16
+    if canShowCards then
+        local col=math.floor((w-3)/2)
+        local leftX,rightX=2,w-col
+        cellText(m,2,4,w-2,"LIVE STATUS / READOUT",colors.cyan)
+        sectionHeader(m,leftX,5,col,"FISSION REACTOR")
+        sectionHeader(m,rightX,5,col,"TURBINE + TANKS")
+        local function line(x,row,text,fg)
+            cellText(m,x,row,col,text,fg)
+        end
+        local formedR=value("reactor","isFormed")
+        local activeR=value("reactor","getStatus")
+        local formedT=value("turbine","isFormed")
+        local function yn(x)
+            if x==true then return "YES" end
+            if x==false then return "NO" end
+            return "--"
+        end
+        local fuel=fraction("reactor","getFuelFilledPercentage")
+        local coolant=fraction("reactor","getCoolantFilledPercentage")
+        local steam=fraction("turbine","getSteamFilledPercentage")
+        local waste=fraction("reactor","getWasteFilledPercentage")
+        line(leftX,6,"FORMED "..yn(formedR),formedR==true and colors.lime or colors.orange)
+        line(leftX,7,"ACTIVE "..yn(activeR),activeR==true and colors.lime or colors.lightGray)
+        line(leftX,8,"CORE "..stringify("getTemperature",value("reactor","getTemperature")))
+        line(leftX,9,"DAMAGE "..nfmt(value("reactor","getDamagePercent"),2).."%")
+        line(leftX,10,"BURN "..nfmt(value("reactor","getBurnRate"),2).." mB/t")
+        line(leftX,11,"ACTUAL "..nfmt(value("reactor","getActualBurnRate"),2).." mB/t")
+        line(leftX,12,"FUEL "..fractionText(fuel),colors.cyan)
+        progressBar(m,leftX,13,col,fuel,colors.lime)
+        line(leftX,14,"COOLANT "..fractionText(coolant),colors.cyan)
+        progressBar(m,leftX,15,col,coolant,colors.lightBlue)
+
+        line(rightX,6,"FORMED "..yn(formedT),formedT==true and colors.lime or colors.orange)
+        line(rightX,7,"OUTPUT "..nfmt(value("turbine","getProductionRate"),1))
+        line(rightX,8,"FLOW "..nfmt(value("turbine","getFlowRate"),1).." mB/t")
+        line(rightX,9,"STEAM IN "..nfmt(value("turbine","getLastSteamInputRate"),1))
+        line(rightX,10,"DUMP "..tostring(value("turbine","getDumpingMode") or "--"))
+        line(rightX,11,"STEAM "..fractionText(steam),colors.cyan)
+        progressBar(m,rightX,12,col,steam,colors.lightBlue)
+        line(rightX,13,"HEATED "..fractionText(fraction("reactor","getHeatedCoolantFilledPercentage")))
+        line(rightX,14,"WASTE "..fractionText(waste),colors.cyan)
+        progressBar(m,rightX,15,col,waste,colors.orange)
+        writeAt(m,1,h,string.rep(" ",w),colors.lightGray,colors.gray)
+        writeAt(m,2,h,"TAP CORE/TURB FOR ALL READINGS",colors.white,colors.gray)
+        return
+    end
+
+    -- All original API values, diagnostics and method names remain pageable.
+    local title=({OVERVIEW="SUMMARY",REACTOR="FISSION / ALL VALUES",
+        TURBINE="TURBINE / ALL VALUES",ERRORS="READ ERRORS",
+        METHODS="EXPOSED METHODS"})[view] or view
+    cellText(m,2,4,w-2,title,colors.cyan)
+    local body=wrappedRows(linesForView(),math.max(1,w-2))
     local perPage=math.max(1,h-5)
     local pages=math.max(1,math.ceil(#body/perPage))
     page=math.max(1,math.min(page,pages))
     for yy=5,h-1 do
         local index=(page-1)*perPage+(yy-5)+1
         if body[index] then
-            writeAt(m,1,yy,body[index],colors.white)
+            cellText(m,2,yy,w-2,body[index],colors.white)
         end
     end
-    button(m,dataZones,1,h,math.max(3,math.floor(w/4)),"< PREV",colors.blue,function() page=math.max(1,page-1) end,true)
-    writeAt(m,math.max(1,math.floor(w/2)-5),h,tostring(page).."/"..tostring(pages),colors.cyan)
-    button(m,dataZones,math.max(1,w-math.floor(w/4)+1),h,math.floor(w/4),"NEXT >",colors.blue,
-        function() page=math.min(pages,page+1) end,true)
+    local third=math.max(1,math.floor(w/3))
+    button(m,dataZones,1,h,third,"< PREV",colors.blue,
+        function() page=math.max(1,page-1) end,page>1)
+    button(m,dataZones,w-third+1,h,third,"NEXT >",colors.blue,
+        function() page=math.min(pages,page+1) end,page<pages)
+    local counter=tostring(page).."/"..tostring(pages)
+    writeAt(m,math.max(1,math.floor((w-#counter)/2)+1),h,counter,colors.cyan)
 end
 
 local function actionAllowed(action)
@@ -341,81 +465,136 @@ end
 
 local function drawControl()
     local m=control.monitor
-    m.setBackgroundColor(colors.black); m.clear()
+    m.setBackgroundColor(colors.black)
+    m.clear()
     controlZones={}
     local w,h=m.getSize()
-    local full=math.max(1,w)
-    local half=math.floor((full-1)/2)
-    writeAt(m,1,1,"TY / REMOTE CONTROL",colors.cyan)
-    local link=not latest and "WAITING" or (live() and "LIVE" or "OFFLINE")
-    writeAt(m,1,2,"Link: "..link.." | #"..tostring(plantId or "--"),live() and colors.lime or colors.red)
-    button(m,controlZones,1,3,half,"REACTOR",controlsPage=="REACTOR" and colors.blue or colors.gray,
-        function() controlsPage="REACTOR"; confirmCandidate=nil end,true)
-    button(m,controlZones,half+2,3,full-half-1,"TURBINE",controlsPage=="TURBINE" and colors.blue or colors.gray,
-        function() controlsPage="TURBINE"; confirmCandidate=nil end,true)
-    if controlsPage=="REACTOR" then
-        writeAt(m,1,5,"Status: "..stringify("getStatus",value("reactor","getStatus")))
-        writeAt(m,1,6,"Temp: "..stringify("getTemperature",value("reactor","getTemperature")))
-        writeAt(m,1,7,"Burn: "..stringify("getBurnRate",value("reactor","getBurnRate")) .. " mB/t")
-        writeAt(m,1,8,"Actual: "..stringify("getActualBurnRate",value("reactor","getActualBurnRate")))
-        writeAt(m,1,9,"Max: "..stringify("getMaxBurnRate",value("reactor","getMaxBurnRate")) .. "  Cap:" .. tostring(policy().burnRateCap or "LOCKED"))
-        writeAt(m,1,11,"SET BURN: "..nfmt(burnDraft or value("reactor","getBurnRate"),1))
-        local en=actionAllowed("setBurnRate")
-        local fourth=math.floor((full-3)/4)
-        button(m,controlZones,1,12,fourth,"-10",colors.gray,function()shiftBurn(-10) end,en)
-        button(m,controlZones,fourth+2,12,fourth,"-1",colors.gray,function()shiftBurn(-1) end,en)
-        button(m,controlZones,fourth*2+3,12,fourth,"+1",colors.gray,function()shiftBurn(1) end,en)
-        button(m,controlZones,fourth*3+4,12,full-fourth*3-3,"+10",colors.gray,function()shiftBurn(10) end,en)
-        button(m,controlZones,1,13,half,"-0.1",colors.gray,function()shiftBurn(-0.1) end,en)
-        button(m,controlZones,half+2,13,full-half-1,"+0.1",colors.gray,function()shiftBurn(0.1) end,en)
-        button(m,controlZones,1,15,full,"APPLY BURN RATE",colors.orange,function()
-            requestCommand("setBurnRate",burnDraft or value("reactor","getBurnRate"))
-        end,en)
-        button(m,controlZones,1,17,half,"ACTIVATE",colors.orange,function()
+    local half=math.floor(w/2)
+    local link=not latest and "WAIT" or (live() and "LIVE" or "OFFLINE")
+    writeAt(m,1,1,string.rep(" ",w),colors.white,colors.blue)
+    writeAt(m,1,1,"TY / CONTROL",colors.white,colors.blue)
+    writeAt(m,1,2,string.rep(" ",w),colors.lightGray,colors.gray)
+    writeAt(m,1,2,"#"..tostring(plantId or CFG.plant_id).." "..link,
+        live() and colors.lime or colors.orange,colors.gray)
+
+    local function changeTab(tab)
+        controlsPage=tab
+        confirmCandidate=nil
+    end
+    for _,tab in ipairs({
+        {"CORE",1,3,half},{"BURN",half+1,3,w-half},
+        {"LOGIC",1,4,half},{"TURB",half+1,4,w-half},
+    }) do
+        local selected=controlsPage==tab[1]
+        local name=tab[1]
+        button(m,controlZones,tab[2],tab[3],tab[4],name,
+            selected and colors.blue or colors.gray,
+            function() changeTab(name) end,true)
+    end
+
+    -- Divide the remaining height into ten proportional bands. Buttons use
+    -- every character row within their band, with matching touch rectangles.
+    local startY,endY=5,h-2
+    local bodyHeight=math.max(1,endY-startY+1)
+    local function bandBounds(index)
+        local y1=startY+math.floor((index-1)*bodyHeight/10)
+        local y2=startY+math.floor(index*bodyHeight/10)-1
+        return y1,math.max(y1,y2)
+    end
+    local function bandText(index,caption,fg)
+        local y1,y2=bandBounds(index)
+        local yy=math.floor((y1+y2)/2)
+        cellText(m,1,yy,w,caption,fg)
+    end
+    local function wholeButton(first,last,label,color,fn,enabled)
+        local y1=bandBounds(first)
+        local _,y2=bandBounds(last)
+        button(m,controlZones,1,y1,w,label,color,fn,enabled,y2-y1+1)
+    end
+    local function splitButtons(index,leftLabel,rightLabel,leftFn,rightFn,enabled)
+        local y1,y2=bandBounds(index)
+        button(m,controlZones,1,y1,half,leftLabel,colors.gray,leftFn,enabled,y2-y1+1)
+        button(m,controlZones,half+1,y1,w-half,rightLabel,colors.gray,rightFn,enabled,y2-y1+1)
+    end
+    local function nn(kind,method,digits)
+        return nfmt(value(kind,method),digits)
+    end
+    local function capText()
+        return type(policy().burnRateCap)=="number" and nfmt(policy().burnRateCap,1) or "LOCKED"
+    end
+
+    if controlsPage=="CORE" then
+        local running=value("reactor","getStatus")
+        bandText(1,"FISSION STATUS",colors.cyan)
+        bandText(2,"STATE "..(running==true and "RUN" or (running==false and "STOP" or "--")),
+            running==true and colors.lime or colors.orange)
+        bandText(3,"TEMP "..nn("reactor","getTemperature",1).." C")
+        bandText(4,"BURN "..nn("reactor","getBurnRate",2))
+        bandText(5,"DAMAGE "..nn("reactor","getDamagePercent",1).."%")
+        bandText(6,"CAP "..capText(),colors.lightGray)
+        wholeButton(7,8,"ACTIVATE",colors.orange,function()
             requestCommand("activate")
         end,actionAllowed("activate"))
-        button(m,controlZones,half+2,17,full-half-1,"SCRAM / STOP",colors.red,function()
+        wholeButton(9,10,"SCRAM / STOP",colors.red,function()
             requestCommand("scram")
         end,actionAllowed("scram"))
-        writeAt(m,1,19,"Logic: "..tostring(value("reactor","getLogicMode") or "--"))
-        writeAt(m,1,20,"New: "..tostring(logicDraft or value("reactor","getLogicMode") or "--"))
-        local le=actionAllowed("setLogicMode")
-        button(m,controlZones,1,21,half,"< MODE",colors.gray,function()nextLogic(-1) end,le)
-        button(m,controlZones,half+2,21,full-half-1,"MODE >",colors.gray,function()nextLogic(1) end,le)
-        button(m,controlZones,1,22,full,"APPLY LOGIC MODE",colors.orange,function()
+    elseif controlsPage=="BURN" then
+        local en=actionAllowed("setBurnRate")
+        bandText(1,"BURN RATE",colors.cyan)
+        bandText(2,"LIVE "..nn("reactor","getBurnRate",2))
+        bandText(3,"SET  "..nfmt(burnDraft or value("reactor","getBurnRate"),2),colors.yellow)
+        bandText(4,"CAP  "..capText(),colors.lightGray)
+        splitButtons(5,"-10","+10",function()shiftBurn(-10) end,function()shiftBurn(10) end,en)
+        splitButtons(6,"-1","+1",function()shiftBurn(-1) end,function()shiftBurn(1) end,en)
+        splitButtons(7,"-0.1","+0.1",function()shiftBurn(-0.1) end,function()shiftBurn(0.1) end,en)
+        wholeButton(8,10,"APPLY BURN",colors.orange,function()
+            requestCommand("setBurnRate",burnDraft or value("reactor","getBurnRate"))
+        end,en)
+    elseif controlsPage=="LOGIC" then
+        local current=tostring(value("reactor","getLogicMode") or "--")
+        local drafted=tostring(logicDraft or value("reactor","getLogicMode") or "--")
+        local limit=math.max(1,w-4)
+        bandText(1,"REACTOR LOGIC",colors.cyan)
+        bandText(2,"NOW "..current:sub(1,limit))
+        bandText(3,"    "..current:sub(limit+1))
+        bandText(4,"SET "..drafted:sub(1,limit),colors.yellow)
+        bandText(5,"    "..drafted:sub(limit+1),colors.yellow)
+        local en=actionAllowed("setLogicMode")
+        wholeButton(6,6,"< PREVIOUS",colors.gray,function()nextLogic(-1) end,en)
+        wholeButton(7,7,"NEXT MODE >",colors.gray,function()nextLogic(1) end,en)
+        wholeButton(8,10,"APPLY LOGIC",colors.orange,function()
             requestCommand("setLogicMode",logicDraft or value("reactor","getLogicMode"))
-        end,le)
-        writeAt(m,1,24,"Start/Logic may be locked at plant.",colors.lightGray)
+        end,en)
     else
-        writeAt(m,1,5,"Production: "..stringify("getProductionRate",value("turbine","getProductionRate")))
-        writeAt(m,1,6,"Flow: "..stringify("getFlowRate",value("turbine","getFlowRate")) .. " mB/t")
-        writeAt(m,1,7,"Steam: "..stringify("getSteamFilledPercentage",value("turbine","getSteamFilledPercentage")))
-        writeAt(m,1,8,"Current: "..tostring(value("turbine","getDumpingMode") or "--"))
         local en=actionAllowed("setDumpingMode")
-        writeAt(m,1,10,"STEAM DUMPING MODE",colors.yellow)
-        button(m,controlZones,1,12,full,"IDLE",colors.green,function()
+        bandText(1,"TURBINE / H2O",colors.cyan)
+        bandText(2,"OUT "..nn("turbine","getProductionRate",1))
+        bandText(3,"FLOW "..nn("turbine","getFlowRate",1))
+        bandText(4,"STEAM "..fractionText(fraction("turbine","getSteamFilledPercentage")))
+        bandText(5,"DUMP MODE",colors.cyan)
+        bandText(6,tostring(value("turbine","getDumpingMode") or "--"),colors.yellow)
+        wholeButton(7,7,"IDLE",colors.green,function()
             requestCommand("setDumpingMode",DUMP_MODES[1]) end,en)
-        button(m,controlZones,1,14,full,"DUMPING_EXCESS",colors.orange,function()
+        wholeButton(8,8,"EXCESS",colors.orange,function()
             requestCommand("setDumpingMode",DUMP_MODES[2]) end,en)
-        button(m,controlZones,1,16,full,"DUMPING (DISCARD)",colors.red,function()
+        wholeButton(9,10,"DUMP / LOSS",colors.red,function()
             requestCommand("setDumpingMode",DUMP_MODES[3]) end,en)
-        writeAt(m,1,19,"WARNING: Dumped steam loses",colors.yellow)
-        writeAt(m,1,20,"recycled water in closed loop.",colors.yellow)
-        writeAt(m,1,22,"Turbine mode may be locked",colors.lightGray)
-        writeAt(m,1,23,"by plant safety settings.",colors.lightGray)
     end
-    if h>=26 then
-        writeAt(m,1,h-3,"Double-tap changes; SCRAM once.",colors.lightGray)
-        local info=lastAck or "No commands issued"
-        local msg=info:sub(1,full)
-        writeAt(m,1,h-2,msg, (lastAck and lastAck:match("FAILED|LOCKED|NO ACK|did not match")) and colors.red or colors.cyan)
-        if #info>full then writeAt(m,1,h-1,info:sub(full+1,2*full),colors.cyan) end
-    end
+
+    -- Reserve the bottom two rows for the persistent command result.
+    local info=lastAck or "2-TAP / SCRAM 1"
+    if confirmCandidate then info="TAP SAME AGAIN TO CONFIRM" end
+    local alert=lastAck and lastAck:match("FAILED|LOCKED|NO ACK|ERROR|did not match")
+    writeAt(m,1,h-1,string.rep(" ",w),colors.white,colors.gray)
+    writeAt(m,1,h,string.rep(" ",w),colors.white,colors.gray)
+    writeAt(m,1,h-1,info:sub(1,w),alert and colors.orange or colors.cyan,colors.gray)
+    writeAt(m,1,h,info:sub(w+1,2*w),alert and colors.orange or colors.white,colors.gray)
 end
 
 local function touch(zones,x,y)
     for _,z in ipairs(zones) do
-        if y==z.y and x>=z.x1 and x<=z.x2 then
+        if y>=(z.y1 or z.y) and y<=(z.y2 or z.y)
+            and x>=z.x1 and x<=z.x2 then
             z.fn();return true
         end
     end
@@ -440,7 +619,10 @@ end
 
 openModems()
 data,control=chooseMonitors()
+local dataScale=fitScale(data.monitor,34,16)
+local controlScale=fitScale(control.monitor,14,16)
 print("TY Mekanism base computer #"..os.getComputerID())
+print("Dashboard scale: "..tostring(dataScale).." | Control scale: "..tostring(controlScale))
 print("Left(data): "..data.name.." Right(control): "..control.name)
 print("Plant ID lock: "..tostring(CFG.plant_id))
 print("Control: touch twice to confirm, except immediate SCRAM")
@@ -475,6 +657,8 @@ while true do
             touch(controlZones,b,c);drawControl()
         end
     elseif event=="monitor_resize" then
+        if a==data.name then fitScale(data.monitor,34,16) end
+        if a==control.name then fitScale(control.monitor,14,16) end
         if a==data.name or a==control.name then drawData();drawControl() end
     elseif event=="key" and a==keys.s then
         saveLatest();print("Saved "..OUTPUT_FILE)
