@@ -9,9 +9,10 @@ ATM10 8.3（Minecraft / Mekanism / CC:Tweaked）核分裂反應爐與工業渦�
 日後不需要每次手動貼 GitHub 長網址。使用一份 [`ty.lua`](ty.lua) 腳本，自動依電腦 ID 選取程式：資料中心 **#0**、核電廠 **#3**、基地 **#4**、Pocket **#6**。
 
 - 第一次安裝：從 [Raw ty.lua](https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_Code/main/ty.lua) 下載檔案並拖進 CraftOS，輸入 `ty.lua install`。
-- 一般更新：輸入 `ty.lua update`，會先驗證下載內容、保留 `.tybak` 舊版，**不會自動重啟背景程式**。
-- 資料中心集中更新：在 **#0** 輸入 `ty.lua all`，更新資料中心本身，並透過既有管理代理遠端更新基地 **#4**。
-- 核電廠 **#3**：不參與批次自動更新；必須確認反應爐已安全停止後，才允許人工更新，原本安全參數不會默默被保留或猜測。
+- 選擇程式更新：`ty.lua update` **只列出可選檔案**；使用 `ty.lua update ty.lua`、`ty.lua update dc_agent.lua` 等指令，只更新指定的本機檔案。可先用 `ty.lua check ty.lua` 比對版本。
+- 全部更新：明確輸入 `ty.lua update all`，才會更新這台電腦所有受管理檔案；下載驗證、`.tybak` 備份與失敗回復機制不變，**不會自動重啟背景程式**。
+- 資料中心集中更新：在 **#0** 輸入 `ty.lua all`，更新資料中心本身，並透過既有管理代理遠端更新基地 **#4**；這與單機 `ty.lua update all` 不同。
+- 核電廠 **#3**：運轉中只允許在本機選擇更新**不涉及反應爐控制程式的磁碟檔案**（如 `ty.lua`、`dc_agent.lua`）；`mek_send.lua` 或全部更新仍須確認反應爐安全停止，原本安全參數不會默默被保留或猜測。舊版 `ty.lua` 不支援選擇更新，請先依 [升級步驟](INSTALLER.md#舊版-tylua-升級到選擇更新) 取得新管理器。
 
 [完整安裝說明與安全限制](INSTALLER.md)。現有 `dc_center.lua`、`dc_agent.lua` 的通訊協定與 Mekanism 監控程式未因這次新增安裝器而改動。
 
