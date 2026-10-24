@@ -8,7 +8,7 @@
 
 在資料中心 #0 執行 `peripheral.find("chat_box") ~= nil` 回傳 `false`，目前**無法接收玩家聊天 UUID**。請先放置 Advanced Peripherals **Chat Box** 緊貼電腦或以 Wired Modem、Networking Cable 連接，並確認 Wired Modem 已啟用 peripheral。
 
-安裝後在 #0 執行 `dc_chat_probe.lua`；玩家於聊天輸入 `$typrobe`。預期主控台出現 `Hidden event OK`，指定玩家收到私人回覆。此階段 **不會啟用登入功能**。若遙遠位置測試收不到事件，先確認遊戲內 Chat Box 能否接收該訊息、周邊連線及程式是否持續執行，不以近距離通過推論全地圖可用。
+安裝 Chat Box 後，在 #0 的 CraftOS Shell 先執行 `ty update`（更新安裝器本身），再執行 `ty install`（由新版安裝器安裝 `dc_chat_probe.lua`），最後用 `bg dc_chat_probe.lua` 啟動診斷。玩家於遊戲聊天輸入 `$typrobe`。預期主控台出現 `Hidden event OK`，指定玩家收到私人回覆。此階段 **不會啟用登入功能**。若遙遠位置測試收不到事件，先確認遊戲內 Chat Box 能否接收該訊息、周邊連線及程式是否持續執行，不以近距離通過推論全地圖可用。
 
 本專案將 Chat Box 事件提供的玩家 UUID 當成**遊戲內事件資料**，不聲稱能獨立驗證玩家在遊戲外的真實身分。資料中心僅驗證事件欄位、登入挑戰、裝置憑證及授權；其他環境的設定不屬於本專案。
 
@@ -23,7 +23,7 @@
 
 ## 上線門檻
 
-- Chat Box 接線、隱藏訊息及指定玩家私訊、跨地點事件收取均經你的伺服器實測。
+- Chat Box 接線、隱藏訊息、指定玩家私訊及跨位置事件收取均經你的 Minecraft 世界內實測。
 - 資料中心只使用遊戲內 Chat Box 事件回傳的 UUID 與玩家名稱；缺少身分欄位或無法關聯到登入挑戰時一律拒絕，不聲稱已驗證遊戲外身分。
 - 持久化裝置憑證／撤銷狀態、重開機、速率限制、五次錯誤、兩分鐘失效、2FA 離線情況與未授權操作均通過測試。
 - 中心 `dc_center.lua` 對所有管理指令與 Shell 訊息實施統一驗證，沒有舊版直通繞過；`mek_send.lua` 等直接 Rednet 控制管道另外核對安全邊界。
