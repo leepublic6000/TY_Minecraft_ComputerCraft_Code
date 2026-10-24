@@ -151,11 +151,24 @@ local function inject(packet)
     end
     resumeShell(packet.event,table.unpack(a))
 end
+-- When player authentication is enabled, prohibit direct #6 -> #0 Shell.
+-- Such a direct channel bypasses the data-centre authentication gateway.
+local function centreLoginIsRequired()
+    if id~=0 or not fs.exists("ty_auth_state.json") then return false end
+    local h=fs.open("ty_auth_state.json","r")
+    if not h then return true end
+    local raw=h.readAll();h.close()
+    local ok,obj=pcall(textutils.unserialiseJSON,raw)
+    return not ok or type(obj)~="table" or obj.enabled==true
+end
 local function handle(packet)
     if type(packet)~="table" or packet.v~=1 or type(packet.kind)~="string"
         or type(packet.sid)~="string" or #packet.sid>70
         or not packet.sid:match("^[%w_:%-]+$") then return end
     if packet.kind=="open" then
+        if centreLoginIsRequired() then
+            response({kind="error",sid=packet.sid,reason="Centre #0 Shell disabled during player-auth mode"});return
+        end
         if not stoppedReactor() then
             response({kind="error",sid=packet.sid,reason="PLANT LOCK: reactor must be STOPPED"});return
         end
@@ -204,7 +217,9 @@ while true do
         handle(b)
     elseif event=="timer" and a==tick then
         if not enabled() then closeSession("Remote host disabled"); break end
-        if session and id==3 and not stoppedReactor() then
+        if session and id==0 and centreLoginIsRequired() then
+            closeSession("Centre player-auth mode enabled; direct Shell closed")
+        elseif session and id==3 and not stoppedReactor() then
             closeSession("Plant reactor no longer stopped")
         elseif session and os.clock()-session.last>45 then
             closeSession("Remote session expired")
