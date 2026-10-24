@@ -56,7 +56,7 @@ local function can(action)
     if not d or not d.present or not d.values or d.values.isFormed ~= true then
         return false
     end
-    if action == "scram" then return true end
+    if action == "scram" then return policy().scram == true end
     if action == "activate" then return policy().activate == true end
     if action == "setBurnRate" then return type(policy().burnRateCap) == "number" end
     if action == "setLogicMode" then return policy().logicMode == true end
