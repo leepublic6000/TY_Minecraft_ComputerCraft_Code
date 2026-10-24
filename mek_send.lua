@@ -6,7 +6,7 @@
 local CFG = {
     sample_seconds = 1,
     trusted_base_id = 4,          -- Verified base computer ID
-    trusted_pocket_id = 2,        -- Verified Advanced Pocket Computer ID
+    trusted_pocket_id = 6,        -- Verified Advanced Pocket Computer ID
     max_allowed_burn_rate = nil,  -- REQUIRED for setBurnRate: your VERIFIED safe limit (mB/t)
     allow_remote_scram = false, -- Explicitly enable only after verifying safety controls
     allow_remote_activate = false,
