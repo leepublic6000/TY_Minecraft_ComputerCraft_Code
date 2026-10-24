@@ -27,8 +27,7 @@ if not box then
     return
 end
 print("Chat Box found at " .. name)
-print("Verify server.properties online-mode=true and white-list=true separately.")
-print("This program cannot read server.properties or verify player account login mode.")
+print("This checks only Minecraft in-world Chat Box events; no server administration.")
 print("Type $typrobe in Minecraft CHAT near the Chat Box to test hidden event delivery.")
 print("Type Ctrl+T to stop. Only a matching hidden probe receives a private reply.")
 local lastReply = {}
