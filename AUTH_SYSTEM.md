@@ -6,10 +6,10 @@
 
 ## 安裝方式（沿用統一安裝器）
 
-1. 在資料中心 #0，保留原本 `dc-center` 分頁。切換到 `shell`，執行 `ty update`（使用舊安裝器更新自身）並確認 `YES`，接著再執行 `ty install`（新版安裝器安裝 `dc_auth.lua`），確認 `YES`。**兩項要連續完成，不要在中途重新啟動資料中心。**
-2. 回到 `dc-center` 輸入 `exit`，在 Shell 執行 `bg dc_center.lua`，新版資料中心會載入 `dc_auth.lua`。Chat Box 已確認在資料中心 #0 的 `right`。保持其所在區塊載入。
-3. 在 Pocket #6 使用 `ty update`、`ty install`，確認 `dc_remote.lua`、`dc_2fa.lua` 與 `dc_shell_client.lua` 已安裝，關閉舊的 `pdc>` 後再執行 `dc_remote.lua`。
-4. 建議先不動核電廠 #3、基地 #4 的 `dc_agent.lua`、`mek_send.lua`、`mek_watch.lua`。新認證控制的是經資料中心 #0 的管理命令／完整 Shell 工作階段，不會自行操作反應爐。
+1. 在資料中心 #0 的 CraftOS `shell` 分頁，先用 `ty.lua help` 確定管理器支援指定檔案更新；接著執行 `ty.lua update dc_center.lua`，需要時用 `ty.lua install` 補齊 `dc_auth.lua`（請確認安裝檔案列表再輸入 `YES`）。舊版不支援選檔時，依 [INSTALLER.md](INSTALLER.md#舊版-tylua-升級到選擇更新) 升級，避免誤更新全部檔案。
+2. 在資料中心 #0 原本 `dc>` 主控台輸入 `exit`，再從 Shell 執行 `bg dc_center.lua` 讓新版資料中心載入認證。Chat Box 需仍可由 #0 找到，所在區塊須維持載入。
+3. 在 Pocket #6 分別執行 `ty.lua update dc_remote.lua`、`ty.lua update dc_shell_client.lua`；若缺少 `dc_2fa.lua` 等必要檔案，可先確認安裝清單後執行 `ty.lua install`。離開舊 `pdc>` 再執行 `dc_remote.lua`。
+4. #3 的受限遠端管理只需將 `dc_shell_host.lua` 更新、由本機輸入 `PLANT` 啟用並啟動獨立分頁；不用修改 `dc_agent.lua`、`mek_send.lua`、`mek_watch.lua`。具體步驟見 [REMOTE_SHELL.md](REMOTE_SHELL.md#d-核電廠-3已驗證管理員可於運轉中遠端管理)。
 
 ## 首次註冊玩家與啟用身分驗證
 
