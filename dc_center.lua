@@ -225,7 +225,20 @@ local function onShellClient(client, packet)
     if type(sid)~="string" or #sid<5 or #sid>70
         or not sid:match("^[%w_:%-]+$") then return end
     local kind=packet.kind
-    if kind~="open" and kind~="close" and kind~="input" and kind~="ping" then return end
+    if kind~="open" and kind~="close" and kind~="input" and kind~="line"
+        and kind~="ping" then return end
+    -- Complete command lines are only allowed for authenticated Pocket #6
+    -- to the running-plant limited console. No arbitrary command routing.
+    if kind=="line" then
+        if target~=3 or type(packet.seq)~="number"
+            or packet.seq<1 or packet.seq>100000000
+            or packet.seq~=math.floor(packet.seq)
+            or type(packet.line)~="string" or #packet.line>80
+            or packet.line:find("[%c]") then
+            shellError(client,sid,target,"Invalid restricted command line")
+            return
+        end
+    end
     local ses=terminalSessions[target]
     if kind=="open" then
         if ses and os.clock()-ses.last<45 then
@@ -258,6 +271,9 @@ local function onShellClient(client, packet)
     elseif kind=="input" then
         forwarded.event=packet.event
         forwarded.args=packet.args
+    elseif kind=="line" then
+        forwarded.seq=packet.seq
+        forwarded.line=packet.line
     end
     local sent=rednet.send(target,forwarded,SHELL_HOST)
     if not sent then
