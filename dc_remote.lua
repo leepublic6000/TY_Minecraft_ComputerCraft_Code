@@ -7,9 +7,11 @@ local CENTRE_ID = 0
 local REQUEST = "ty.dc.v1:remote_request"
 local RESPONSE = "ty.dc.v1:remote_response"
 local TIMEOUT = 12
-local CHANGES = { update=true, start=true, stop=true, restart=true }
+local CHANGES = { update=true, start=true, stop=true, restart=true,
+                  unlock=true, lock=true }
 local ACTIONS = { nodes=true, info=true, status=true, update=true,
-                  start=true, stop=true, restart=true }
+                  start=true, stop=true, restart=true,
+                  panel=true, unlock=true, lock=true }
 local sequence = 0
 local AUTH_REQUEST="ty.auth.v1:request"
 local AUTH_REPLY="ty.auth.v1:reply"
@@ -139,6 +141,9 @@ local function help()
     print("info <id>      show node status")
     print("status <id>    request fresh status")
     print("shell <id>     #3: verified live admin or stopped full Shell")
+    print("panel 4        base touch-control lock status")
+    print("unlock 4       admin grants base control for 5 min")
+    print("lock 4         admin locks base control NOW")
     print("update <id>    update node app")
     print("start <id>     start node app")
     print("stop <id>      stop node app")
@@ -204,6 +209,11 @@ while true do
             print("dc_shell_client.lua missing: run ty.lua install on Pocket")
         end
     elseif action and ACTIONS[action] then
+        local panelAction=(action=="panel" or action=="unlock" or action=="lock")
+        if panelAction and (os.getComputerID()~=6 or not authRequired or not authSession) then
+            print("Base panel requires signed-in admin on Pocket #6.")
+            print("Use login first (auth must be enabled at data centre #0).")
+        else
         local target = nil
         if action ~= "nodes" then
             target = tonumber(arg)
@@ -216,8 +226,10 @@ while true do
             local confirmed = false
             local proceed = true
             if CHANGES[action] then
-                write("Confirm " .. action .. " on #" .. target .. ": type YES > ")
-                confirmed = (string.upper((read() or "")) == "YES")
+                local word=(action=="unlock" and "UNLOCK")
+                    or (action=="lock" and "LOCK") or "YES"
+                write("Confirm "..action.." on #"..target..": type "..word.." > ")
+                confirmed=(read()==word)
                 if not confirmed then
                     print("Cancelled")
                     proceed = false
@@ -234,6 +246,13 @@ while true do
                         showNodes(reply.data)
                     elseif action == "info" then
                         showInfo(reply.data)
+                    elseif panelAction then
+                        print("OK: "..tostring(reply.message))
+                        local data=reply.data
+                        if type(data)=="table" then
+                            print("Base panel: "..(data.unlocked==true and "UNLOCKED" or "LOCKED"))
+                            print("Lease remaining: "..tostring(data.remainingSeconds or 0).." sec")
+                        end
                     else
                         print("OK: " .. tostring(reply.message))
                         if reply.data and type(reply.data) == "table" then
@@ -243,6 +262,7 @@ while true do
                 end
             end
         end
+        end -- authenticated Pocket panel-access gate
     elseif action then
         print("Unknown command; type help")
     end
