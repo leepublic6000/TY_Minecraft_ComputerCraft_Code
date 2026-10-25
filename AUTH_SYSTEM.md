@@ -62,7 +62,7 @@ $tyrevokeall
 
 - Rednet 沒有端對端加密／可靠來源驗證。Pocket 的裝置憑證和管理工作階段 Token 經 Rednet 傳送，可能被能竊聽該網路的人重播或複製。
 - CC:Tweaked 提供的 `math.random` **不是加密安全亂數來源**。這套功能可供可信任的私人遊戲世界管理與身分關聯，不能宣稱能抵禦具惡意且有電腦／Modem 存取權的玩家。若將來需要面對不可信玩家，必須增加經驗證的亂數來源、訊息認證、防重放設計後，才可視為高信任登入。
-- 資料中心 #0 的**直接**遠端 Shell 在啟用玩家登入後會被 Host 拒絕，以避免繞過資料中心授權。#4 的遠端 Shell 仍由 #0 中央驗證；#3 的完整 Shell 仍僅限反應爐停機維護模式。
+- 資料中心 #0 的**直接**遠端 Shell 在啟用玩家登入後會被 Host 拒絕，以避免繞過資料中心授權。#4 的遠端 Shell 仍由 #0 中央驗證；#3 的**完整 Shell** 仍僅限反應爐停機維護模式，但反應爐運轉中可由已驗證的 Pocket #6 **admin** 進入固定白名單的 `plant>` 受限管理終端。#3 無論停機或運轉，都不允許未登入或 auth 未啟用的 Pocket 進入 Shell 工作階段。這不是任意 Lua 的遠端管理。
 - `mek_send.lua` 對 #4／#6 的舊式直接控制 API 尚未納入玩家登入簽章；**其遠端控制預設均為鎖定狀態，不得為了測試登入而開放**。本版是管理通道的認證整合，不應把它描述成反應爐控制通道全面完成授權改造。
 - 初次啟用認證、管理員登記與撤銷緊急狀態都在 Minecraft 世界內的資料中心操作；本專案不觸及 Minecraft 伺服器實體主機。
 
@@ -72,6 +72,7 @@ $tyrevokeall
 - 基地 #4：Pocket #6 收到 2FA、輸入正確才得到資料中心權限；Pocket 離線時拒絕。
 - 未登入：`nodes`、`start 4`、`shell 4` 全部遭到拒絕；管理員登入後可用，唯讀玩家仍無法執行變更或完整 Shell。
 - `$tyrevokeall`：撤銷所有裝置，已建立的遠端 Shell 中止；資料中心重啟後憑證也不能恢復。
+- 核電廠 #3：`Auth: ENABLED` 且 Pocket #6 管理員登入時，反應爐運轉中的 `shell 3` 僅能執行 `plant>` 固定白名單指令；`lua`、`edit`、`update mek_send.lua`、`update all` 必須被拒絕。未登入、viewer、已撤銷管理員都應被拒絕；完整 Shell 僅在確認反應爐停機時開啟，運轉後立即關閉。
 - 遊戲遠距離 Chat Box 已由使用者確認收發正常；正式登入流程仍待在 ATM10 8.3 驗證。
 
 官方依據：[Advanced Peripherals 0.8 Chat Box](https://docs.advanced-peripherals.de/0.8/peripherals/chat_box/)、[CC:Tweaked Rednet](https://tweaked.cc/module/rednet.html)。
