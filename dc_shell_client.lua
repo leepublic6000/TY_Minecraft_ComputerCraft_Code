@@ -22,6 +22,12 @@ local opened=false
 local lastSeen=os.clock()
 local status="CONNECTING..."
 local cursorX,cursorY,cursorBlink=1,1,false
+-- The running plant accepts complete command lines, not one Rednet packet
+-- per keystroke. Other remote Shell modes keep their original event stream.
+local liveMode=false
+local draft,caret="",0
+local nextLineSeq,pendingLine=0,nil
+local inputNotice=nil
 
 local function openRadio()
     for _,name in ipairs(peripheral.getNames()) do
@@ -57,10 +63,34 @@ local function draw()
             term.blit(line[1],line[2],line[3])
         end
     end
-    writeAt(1,height,"Tap [X] or F10: detach",colors.lightGray)
-    if cursorY>=1 and cursorY<=rh and cursorX>=1 and cursorX<=rw then
-        term.setCursorPos(cursorX,cursorY+1)
-        term.setCursorBlink(opened and cursorBlink)
+    if liveMode and opened then
+        local foot=pendingLine and ("SENDING "..pendingLine.tries.."/3")
+            or (inputNotice or "LOCAL TYPING / ENTER SENDS")
+        writeAt(1,height,foot,colors.lightGray)
+        -- Overlay locally edited text at the remote prompt cursor. The
+        -- server still owns command output and screen scrollback.
+        if #draft>0 and cursorY>=1 and cursorY<=rh
+            and cursorX>=1 and cursorX<=rw then
+            local width=rw-cursorX+1
+            local first=math.max(1,caret-width+2)
+            local visible=draft:sub(first,first+width-1)
+            term.setBackgroundColor(colors.black)
+            term.setTextColor(colors.white)
+            term.setCursorPos(cursorX,cursorY+1)
+            term.write(string.rep(" ",width))
+            term.setCursorPos(cursorX,cursorY+1)
+            term.write(visible)
+            term.setCursorPos(cursorX+caret-(first-1),cursorY+1)
+            term.setCursorBlink(not not opened)
+        else
+            term.setCursorBlink(opened and cursorBlink)
+        end
+    else
+        writeAt(1,height,"Tap [X] or F10: detach",colors.lightGray)
+        if cursorY>=1 and cursorY<=rh and cursorX>=1 and cursorX<=rw then
+            term.setCursorPos(cursorX,cursorY+1)
+            term.setCursorBlink(opened and cursorBlink)
+        end
     end
 end
 local function applyFrame(packet)
@@ -85,14 +115,83 @@ local function message(e,a,b,c)
     lastSeen=os.clock()
     if b.kind=="opened" then
         opened=true
-        status=b.mode=="live" and "LIVE LIMITED" or "FULL SHELL"
+        liveMode=b.mode=="live" and target==3
+        status=liveMode and "LIVE LIMITED" or "FULL SHELL"
         draw()
     elseif b.kind=="frame" then applyFrame(b)
+    elseif b.kind=="line_ack" and liveMode then
+        if pendingLine and b.seq==pendingLine.seq then
+            pendingLine=nil
+            draft,caret="",0
+            inputNotice=nil
+            draw()
+        end
+    elseif b.kind=="line_reject" and liveMode then
+        if pendingLine and b.seq==pendingLine.seq then
+            pendingLine=nil
+            inputNotice=tostring(b.reason or "REJECTED"):sub(1,30)
+            draw()
+        end
     elseif b.kind=="error" or b.kind=="closed" then
         status=tostring(b.reason or b.kind):sub(1,45)
         opened=false
         draw()
         return true
+    end
+end
+local function editLocal(text)
+    if pendingLine or type(text)~="string" or #text==0 then return end
+    if text:find("[%c]") or #draft+#text>80 then
+        inputNotice="INPUT LIMIT: 80 CHARS"
+        draw()
+        return
+    end
+    draft=draft:sub(1,caret)..text..draft:sub(caret+1)
+    caret=caret+#text
+    inputNotice=nil
+    draw()
+end
+local function submitLocal()
+    if pendingLine then return end
+    nextLineSeq=nextLineSeq+1
+    local packet={kind="line",seq=nextLineSeq,line=draft}
+    if not send(packet) then
+        inputNotice="SEND FAILED / RETRY ENTER"
+        draw()
+        return
+    end
+    pendingLine={seq=nextLineSeq,line=draft,tries=1,at=os.clock()}
+    inputNotice=nil
+    draw()
+end
+local function handleLocalKey(event,key)
+    if pendingLine then return end
+    if event=="char" or event=="paste" then
+        editLocal(key)
+        return
+    end
+    if event~="key" then return end
+    if key==keys.enter or key==keys.numPadEnter then
+        submitLocal()
+    elseif key==keys.backspace and caret>0 then
+        draft=draft:sub(1,caret-1)..draft:sub(caret+1)
+        caret=caret-1
+        draw()
+    elseif key==keys.delete and caret<#draft then
+        draft=draft:sub(1,caret)..draft:sub(caret+2)
+        draw()
+    elseif key==keys.left then
+        caret=math.max(0,caret-1)
+        draw()
+    elseif key==keys.right then
+        caret=math.min(#draft,caret+1)
+        draw()
+    elseif key==keys.home then
+        caret=0
+        draw()
+    elseif key==keys["end"] then
+        caret=#draft
+        draw()
     end
 end
 openRadio()
@@ -117,9 +216,23 @@ while true do
         end
         if opened then
             if os.clock()-lastSeen>15 then status="NETWORK STALE";draw() end
+            if liveMode and pendingLine and os.clock()-pendingLine.at>=2 then
+                if pendingLine.tries<3 then
+                    send({kind="line",seq=pendingLine.seq,line=pendingLine.line})
+                    pendingLine.tries=pendingLine.tries+1
+                    pendingLine.at=os.clock()
+                    draw()
+                else
+                    inputNotice="NO ACK / OUTCOME UNKNOWN"
+                    status="NO LINE ACK"
+                    draw()
+                end
+            end
             send({kind="ping"})
         end
         refresh=os.startTimer(2)
+    elseif opened and liveMode then
+        handleLocalKey(e,a)
     elseif opened then
         if e=="key" or e=="key_up" then
             send({kind="input",event=e,args={a,b}})
