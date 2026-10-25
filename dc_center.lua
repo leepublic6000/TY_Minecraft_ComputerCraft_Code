@@ -192,20 +192,35 @@ local function shellError(client, sid, target, reason)
 end
 local function onShellClient(client, packet)
     if type(packet)~="table" or packet.v~=1 then return end
+    local target=packet.target
+    if target~=3 and target~=4 then return end
+    -- Plant remote sessions are NEVER available in legacy ID-only mode.
+    -- An admin session from the verified Pocket #6 is required even if
+    -- the reactor is stopped. Keep #4's existing legacy behaviour.
+    if target==3 and (client~=6 or not auth.enabled()) then
+        if type(packet.sid)=="string" then
+            shellError(client,packet.sid,target,"Plant #3 requires verified Pocket #6 admin login")
+        end
+        return
+    end
     if not auth.enabled() and not REMOTE_ALLOWED[client] then return end
     local authorized = nil
     if auth.enabled() then
         local grant, reason=auth.authorize(client,packet.auth,"shell")
         if not grant then
-            if type(packet.sid)=="string" and type(packet.target)=="number" then
-                shellError(client,packet.sid,packet.target,reason or "Login required")
+            -- Reject a revoked/expired session and close its live host promptly.
+            local active=terminalSessions[target]
+            if active and active.client==client and active.sid==packet.sid then
+                rednet.send(target,{v=1,kind="close",sid=active.sid,target=target},SHELL_HOST)
+                terminalSessions[target]=nil
+            end
+            if type(packet.sid)=="string" then
+                shellError(client,packet.sid,target,reason or "Login required")
             end
             return
         end
         authorized=grant.uuid
     end
-    local target=packet.target
-    if target~=3 and target~=4 then return end
     local sid=packet.sid
     if type(sid)~="string" or #sid<5 or #sid>70
         or not sid:match("^[%w_:%-]+$") then return end
@@ -233,9 +248,17 @@ local function onShellClient(client, packet)
             if type(packet.event)~="string" or #packet.event>20 then return end
         end
     end
-    -- Never forward the bearer session credential to the remote host.
-    local forwarded={}
-    for k,v in pairs(packet) do if k~="auth" then forwarded[k]=v end end
+    -- Forward ONLY the transport allowlist. Never pass client-supplied
+    -- privilege flags, bearer tokens or arbitrary fields to the host.
+    local forwarded={v=1,kind=kind,sid=sid,target=target}
+    if kind=="open" then
+        forwarded.w=packet.w
+        forwarded.h=packet.h
+        if target==3 then forwarded.verifiedAdmin=(authorized~=nil) end
+    elseif kind=="input" then
+        forwarded.event=packet.event
+        forwarded.args=packet.args
+    end
     local sent=rednet.send(target,forwarded,SHELL_HOST)
     if not sent then
         terminalSessions[target]=nil
