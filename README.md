@@ -137,6 +137,9 @@ Pocket #6 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0
 
 ## 完整遠端 CraftOS Shell（僅限可信任的私人伺服器）
 
-已加入 [`dc_shell_host.lua`](dc_shell_host.lua)（目標電腦端）、[`dc_shell_client.lua`](dc_shell_client.lua)（Pocket #6 端），並擴充 `dc_center.lua`、`dc_remote.lua`、`ty.lua`。從 Pocket #6 的 `pdc>` 可使用 `shell 4` 操作基地 #4 的獨立 CraftOS 終端；`shell 0` 需資料中心 #0 本機另行啟用 Host。核電廠 #3 預設不開放，只有停堆維護並本機確認後才能啟用。
+已加入 [`dc_shell_host.lua`](dc_shell_host.lua)（目標電腦端）、[`dc_shell_client.lua`](dc_shell_client.lua)（Pocket #6 端），並擴充 `dc_center.lua`、`dc_remote.lua`。從 Pocket #6 的 `pdc>` 可使用 `shell 4` 操作基地 #4；核電廠 #3 則有兩種模式：
 
-**完整 Shell 可執行任意 Lua／檔案管理指令，Rednet 並無加密或身分驗證，僅限完全可信任的私人世界。** 首次仍須在目標電腦本機執行 `dc_shell_host.lua enable` 並啟動 Host；安裝器不會自動替你開啟此權限，亦不會停止原有監控。安裝、更新與驗收流程詳見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
+- **運轉中 #3：** #0 必須啟用玩家登入驗證，Pocket #6 必須為已登入的 admin，且 #3 已在本機啟用新版 Host。此時 `shell 3` 只進入 `plant>` 受限管理終端，支援 `status`、`config`、`boot status/on/off` 及指定管理檔案的 `check`／`update`，**不允許任意 Lua、`edit`、修改 `mek_send.lua`、重啟監控或直接控制反應爐**。
+- **停機中 #3：** 同樣需要驗證管理員身分與本機 Host，`shell 3` 才提供完整 CraftOS Shell；完整 Shell 期間反應爐若開始運轉，工作階段就會被關閉。
+
+**驗證登入不是加密 SSH。** 現有 Rednet 沒有加密、可靠的密碼學來源驗證或抗重放保證，僅限完全可信任的私人世界。首次仍須在目標電腦本機執行 `dc_shell_host.lua enable` 並啟動 Host，不能單靠新版程式隔空安裝；此步驟可在 #3 反應爐運轉中執行，且不會中斷 `mek_send.lua`。詳細部署、白名單與驗收見 [REMOTE_SHELL.md](REMOTE_SHELL.md)。
