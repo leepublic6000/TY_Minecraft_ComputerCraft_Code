@@ -50,6 +50,34 @@ local function writeAt(x,y,msg,color)
     term.setTextColor(color or colors.white)
     term.write(tostring(msg):sub(1,math.max(0,width-x+1)))
 end
+-- Redraw only the local prompt on keystrokes. Network frames still repaint
+-- the whole display; this avoids expensive term.blit calls for every letter.
+local function drawLiveInput()
+    if not liveMode or not opened then return end
+    local width,height=term.getSize()
+    local foot=pendingLine and ("SENDING "..pendingLine.tries.."/3")
+        or (inputNotice or "LOCAL TYPING / ENTER SENDS")
+    term.setCursorPos(1,height)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.lightGray)
+    term.write(string.rep(" ",width))
+    writeAt(1,height,foot,colors.lightGray)
+    if cursorY>=1 and cursorY<=rh and cursorX>=1 and cursorX<=rw then
+        local available=rw-cursorX+1
+        local first=math.max(1,caret-available+2)
+        local visible=draft:sub(first,first+available-1)
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.white)
+        term.setCursorPos(cursorX,cursorY+1)
+        term.write(string.rep(" ",available))
+        term.setCursorPos(cursorX,cursorY+1)
+        term.write(visible)
+        term.setCursorPos(cursorX+caret-(first-1),cursorY+1)
+        term.setCursorBlink(true)
+    else
+        term.setCursorBlink(false)
+    end
+end
 local function draw()
     local width,height=term.getSize()
     term.setBackgroundColor(colors.black)
@@ -64,27 +92,7 @@ local function draw()
         end
     end
     if liveMode and opened then
-        local foot=pendingLine and ("SENDING "..pendingLine.tries.."/3")
-            or (inputNotice or "LOCAL TYPING / ENTER SENDS")
-        writeAt(1,height,foot,colors.lightGray)
-        -- Overlay locally edited text at the remote prompt cursor. The
-        -- server still owns command output and screen scrollback.
-        if #draft>0 and cursorY>=1 and cursorY<=rh
-            and cursorX>=1 and cursorX<=rw then
-            local width=rw-cursorX+1
-            local first=math.max(1,caret-width+2)
-            local visible=draft:sub(first,first+width-1)
-            term.setBackgroundColor(colors.black)
-            term.setTextColor(colors.white)
-            term.setCursorPos(cursorX,cursorY+1)
-            term.write(string.rep(" ",width))
-            term.setCursorPos(cursorX,cursorY+1)
-            term.write(visible)
-            term.setCursorPos(cursorX+caret-(first-1),cursorY+1)
-            term.setCursorBlink(not not opened)
-        else
-            term.setCursorBlink(opened and cursorBlink)
-        end
+        drawLiveInput()
     else
         writeAt(1,height,"Tap [X] or F10: detach",colors.lightGray)
         if cursorY>=1 and cursorY<=rh and cursorX>=1 and cursorX<=rw then
@@ -143,13 +151,13 @@ local function editLocal(text)
     if pendingLine or type(text)~="string" or #text==0 then return end
     if text:find("[%c]") or #draft+#text>80 then
         inputNotice="INPUT LIMIT: 80 CHARS"
-        draw()
+        drawLiveInput()
         return
     end
     draft=draft:sub(1,caret)..text..draft:sub(caret+1)
     caret=caret+#text
     inputNotice=nil
-    draw()
+    drawLiveInput()
 end
 local function submitLocal()
     if pendingLine then return end
@@ -157,12 +165,12 @@ local function submitLocal()
     local packet={kind="line",seq=nextLineSeq,line=draft}
     if not send(packet) then
         inputNotice="SEND FAILED / RETRY ENTER"
-        draw()
+        drawLiveInput()
         return
     end
     pendingLine={seq=nextLineSeq,line=draft,tries=1,at=os.clock()}
     inputNotice=nil
-    draw()
+    drawLiveInput()
 end
 local function handleLocalKey(event,key)
     if pendingLine then return end
@@ -176,22 +184,22 @@ local function handleLocalKey(event,key)
     elseif key==keys.backspace and caret>0 then
         draft=draft:sub(1,caret-1)..draft:sub(caret+1)
         caret=caret-1
-        draw()
+        drawLiveInput()
     elseif key==keys.delete and caret<#draft then
         draft=draft:sub(1,caret)..draft:sub(caret+2)
-        draw()
+        drawLiveInput()
     elseif key==keys.left then
         caret=math.max(0,caret-1)
-        draw()
+        drawLiveInput()
     elseif key==keys.right then
         caret=math.min(#draft,caret+1)
-        draw()
+        drawLiveInput()
     elseif key==keys.home then
         caret=0
-        draw()
+        drawLiveInput()
     elseif key==keys["end"] then
         caret=#draft
-        draw()
+        drawLiveInput()
     end
 end
 openRadio()
