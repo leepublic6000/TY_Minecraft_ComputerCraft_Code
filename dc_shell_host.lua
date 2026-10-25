@@ -1,4 +1,5 @@
 -- TY Remote Shell Host / CC:Tweaked. Run in its own Multishell tab.
+-- TY_RSH_RELOAD_V1: authenticated #3 restricted-console Host-only hot reload.
 -- A real CraftOS shell on #4 (and stopped #3); running #3 gets a fixed,
 -- restricted management console instead of arbitrary Lua or file editing.
 -- Login is checked by #0. Rednet is NOT cryptographically authenticated;
@@ -13,6 +14,7 @@ local MARK = "-- TY_RSH_HOST_V1"
 local MAX_W, MAX_H = 51, 25
 local session, shellThread, waiting, buffer, screenPrevious, cursorPrevious
 local nextFrame = 0
+local reloadRequested = false -- Only LIVE LIMITED's explicit RELOAD confirmation can set this.
 
 local function content(path)
     if not fs.exists(path) or fs.isDir(path) then return nil end
@@ -123,7 +125,8 @@ local function resumeShell(...)
     if not ok then
         closeSession("Shell error: " .. tostring(nextFilter):sub(1,130))
     elseif coroutine.status(shellThread)=="dead" then
-        closeSession("Remote shell exited")
+        closeSession(reloadRequested and "Host reloading; reconnect with shell 3"
+            or "Remote shell exited")
     else
         waiting=nextFilter
     end
@@ -162,6 +165,21 @@ local function liveStatus()
     end
     print("Management does not start/stop or change the reactor.")
 end
+local function canReloadHost()
+    -- Fail closed before closing the running Host. Never reload plant control
+    -- programs or accept a user-chosen executable/path.
+    if id~=3 then return false,"Not a plant computer" end
+    if not enabled() then return false,"Remote Host disabled" end
+    if plantState()=="UNKNOWN" then return false,"Reactor state unknown" end
+    local source=content("dc_shell_host.lua")
+    if not source or #source==0 then return false,"Updated Host file missing" end
+    if not source:find("-- TY_RSH_RELOAD_V1",1,true) then
+        return false,"Updated Host lacks safe reload support"
+    end
+    local loaded,why=load(source,"@dc_shell_host.lua","t",{})
+    if not loaded then return false,"New Host syntax invalid: "..tostring(why) end
+    return true
+end
 local function liveConsole()
     print("TY PLANT #3 / VERIFIED ADMIN")
     print("Reactor ONLINE: RESTRICTED maintenance terminal")
@@ -181,8 +199,23 @@ local function liveConsole()
             print("boot status | boot on | boot off")
             print("check <ty.lua|dc_agent.lua|dc_shell_host.lua>")
             print("update <ty.lua|dc_agent.lua|dc_shell_host.lua>")
+            print("reload host - re-read updated remote Host only")
             print("exit - disconnect")
             print("NO mek_send update, reactor API, lua or edit.")
+        elseif cmd=="reload host" then
+            local safe,reason=canReloadHost()
+            if not safe then
+                print("ABORT: "..tostring(reason))
+            else
+                print("Only remote Shell Host will restart; plant monitoring stays running.")
+                write("Type RELOAD to confirm: ")
+                if read()=="RELOAD" then
+                    reloadRequested=true
+                    print("Reload accepted. This session will disconnect; reconnect shell 3.")
+                    return
+                end
+                print("Cancelled; Host remains running.")
+            end
         elseif cmd=="status" then
             liveStatus()
         elseif cmd=="config" then
@@ -369,35 +402,60 @@ openRadio()
 print("TY Remote Shell Host #"..id.." | Ctrl+T to stop")
 print("Centre: #0, operator: Pocket #6; trusted private world ONLY")
 if id==3 then print("Plant #3: verified admin, LIVE RESTRICTED / STOPPED FULL Shell") end
-local tick=os.startTimer(0.3)
+-- Reuse the SAME Multishell tab for the new Host. Do not spawn a
+-- second Host, restart the computer or touch dc_agent.lua/mek_send.lua.
+local function serviceLoop()
+    local tick=os.startTimer(0.3)
+    while true do
+        local event,a,b,c=os.pullEventRaw()
+        if event=="terminate" then closeSession("Host stopped"); return false end
+        if event=="rednet_message" and a==senderID and c==REQ then
+            handle(b)
+        elseif event=="timer" and a==tick then
+            if not enabled() then closeSession("Remote host disabled"); return false end
+            if session and id==0 and centreLoginIsRequired() then
+                closeSession("Centre player-auth mode enabled; direct Shell closed")
+            elseif session and id==3 and plantState()=="UNKNOWN" then
+                closeSession("Plant reactor state UNKNOWN")
+            elseif session and id==3 and session.mode=="full" and not stoppedReactor() then
+                closeSession("Plant started: full Shell terminated")
+            elseif session and os.clock()-session.last>45 then
+                closeSession("Remote session expired")
+            else
+                sendFrame()
+            end
+            tick=os.startTimer(0.3)
+        elseif shellThread and session then
+            -- Remote input never enters the monitor/plant control tabs.
+            if event~="char" and event~="key" and event~="key_up" and event~="paste"
+                and event~="mouse_click" and event~="mouse_up" and event~="mouse_drag"
+                and event~="mouse_scroll" and event~="terminate" then
+                resumeShell(event,a,b,c)
+                flushLiveLines()
+            end
+        end
+        if reloadRequested then
+            os.cancelTimer(tick)
+            return true
+        end
+    end
+end
+
 while true do
-    local event,a,b,c=os.pullEventRaw()
-    if event=="terminate" then closeSession("Host stopped"); break end
-    if event=="rednet_message" and a==senderID and c==REQ then
-        handle(b)
-    elseif event=="timer" and a==tick then
-        if not enabled() then closeSession("Remote host disabled"); break end
-        if session and id==0 and centreLoginIsRequired() then
-            closeSession("Centre player-auth mode enabled; direct Shell closed")
-        elseif session and id==3 and plantState()=="UNKNOWN" then
-            closeSession("Plant reactor state UNKNOWN")
-        elseif session and id==3 and session.mode=="full" and not stoppedReactor() then
-            closeSession("Plant started: full Shell terminated")
-        elseif session and os.clock()-session.last>45 then
-            closeSession("Remote session expired")
-        else
-            sendFrame()
-        end
-        tick=os.startTimer(0.3)
-    elseif shellThread and session then
-        -- Only events from this local computer (timers, HTTP, Rednet etc.).
-        -- Remote keyboard events are resumed DIRECTLY, never os.queueEvent()'d
-        -- into other Multishell tabs (which run the plant and base services).
-        if event~="char" and event~="key" and event~="key_up" and event~="paste"
-            and event~="mouse_click" and event~="mouse_up" and event~="mouse_drag"
-            and event~="mouse_scroll" and event~="terminate" then
-            resumeShell(event,a,b,c)
-            flushLiveLines()
-        end
+    if not serviceLoop() then break end
+    reloadRequested=false
+    print("[TY] Loading updated dc_shell_host.lua in this same tab...")
+    -- The old serviceLoop is no longer receiving events. The new version
+    -- becomes the ONLY active Host. On a load/startup error, the old in-memory
+    -- code resumes as a fallback without changing any reactor program.
+    local ok,result=pcall(shell.run,"dc_shell_host.lua")
+    if not enabled() then break end
+    if not ok or result==false then
+        print("[TY] New Host startup failed; old Host resumed in memory.")
+        print("[TY] Check dc_shell_host.lua and update/try again.")
+    else
+        -- The replacement Host ran and exited normally. Do not automatically
+        -- launch a second service after an intentional shutdown.
+        break
     end
 end
