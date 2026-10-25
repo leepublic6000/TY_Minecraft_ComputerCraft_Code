@@ -13,6 +13,14 @@ local TELEMETRY = "ty_mek_control_v1:data"
 local COMMAND = "ty_mek_control_v1:command"
 local REPLY = "ty_mek_control_v1:reply"
 local OUTPUT_FILE = "mek_latest.json"
+-- The Pocket does NOT control the reactor. An authenticated admin at #0
+-- grants this base panel a short-lived lease via the dedicated protocol.
+local PANEL_CMD = "ty.dc.v1:panel_command"
+local PANEL_REPLY = "ty.dc.v1:panel_reply"
+local PANEL_HEART = "ty.dc.v1:panel_heartbeat"
+local CENTRE_ID = 0
+local PANEL_LEASE_MS = 5 * 60 * 1000
+local PANEL_CENTRE_TIMEOUT = 12 -- seconds, fail closed if #0 disappears
 
 local LOGIC_MODES = { "DISABLED", "TEMPERATURE", "CRITICAL_WASTE_LEVEL", "DAMAGED", "DEPLETED", "ACTIVATION" }
 local DUMP_MODES = { "IDLE", "DUMPING_EXCESS", "DUMPING" }
@@ -96,6 +104,77 @@ local burnDraft, burnDirty = nil, false
 local logicDraft, logicDirty = nil, false
 local dataZones, controlZones = {}, {}
 local saveError
+local panelLeaseUntil=0 -- RAM only; locked after any base application restart
+local panelLeaseGeneration=nil
+local panelCentreGeneration=nil
+local panelCentreSeen=-math.huge
+
+local function lockPanel(reason)
+    panelLeaseUntil=0
+    panelLeaseGeneration=nil
+    confirmCandidate=nil
+    burnDraft,burnDirty=nil,false
+    logicDraft,logicDirty=nil,false
+    if reason then lastAck=reason;ackAt=os.clock() end
+end
+local function panelUnlocked()
+    if panelLeaseUntil<=0 then return false end
+    if os.epoch("utc")>=panelLeaseUntil
+        or panelLeaseGeneration~=panelCentreGeneration
+        or os.clock()-panelCentreSeen>PANEL_CENTRE_TIMEOUT then
+        lockPanel("PANEL LOCKED / EXPIRED")
+        return false
+    end
+    return true
+end
+local function panelSeconds()
+    return panelUnlocked() and math.max(0,
+        math.ceil((panelLeaseUntil-os.epoch("utc"))/1000)) or 0
+end
+local function sendPanelReply(request,ok,message)
+    rednet.send(CENTRE_ID,{
+        version=1,requestId=request.requestId,action=request.action,
+        generation=request.generation,ok=ok,message=message,
+        unlocked=panelUnlocked(),remainingSeconds=panelSeconds(),
+    },PANEL_REPLY)
+end
+local function handlePanelCommand(sender,request)
+    if sender~=CENTRE_ID or type(request)~="table" or request.version~=1
+        or type(request.requestId)~="string" or #request.requestId<1
+        or #request.requestId>80 or type(request.action)~="string"
+        or type(request.generation)~="string"
+        or #request.generation<1 or #request.generation>80 then return end
+    local action=request.action
+    if action=="unlock" then
+        -- Trust only centre #0's brokered admin grant, never Pocket ID or
+        -- arbitrary reactor commands. Grant duration is determined LOCALLY.
+        panelLeaseGeneration=request.generation
+        panelCentreGeneration=request.generation
+        panelCentreSeen=os.clock()
+        panelLeaseUntil=os.epoch("utc")+PANEL_LEASE_MS
+        confirmCandidate=nil
+        burnDraft,burnDirty=nil,false
+        logicDraft,logicDirty=nil,false
+        lastAck=nil
+        sendPanelReply(request,true,"Base control panel unlocked for 5 minutes")
+    elseif action=="lock" then
+        lockPanel("PANEL LOCKED BY POCKET")
+        sendPanelReply(request,true,"Base control panel locked")
+    elseif action=="panel" then
+        sendPanelReply(request,true,panelUnlocked()
+            and "Base control panel is unlocked" or "Base control panel is locked")
+    end
+end
+local function handlePanelHeartbeat(sender,packet)
+    if sender~=CENTRE_ID or type(packet)~="table" or packet.version~=1
+        or type(packet.generation)~="string"
+        or #packet.generation<1 or #packet.generation>80 then return end
+    if panelLeaseGeneration and packet.generation~=panelLeaseGeneration then
+        lockPanel("PANEL LOCKED / CENTRE RESTARTED")
+    end
+    panelCentreGeneration=packet.generation
+    panelCentreSeen=os.clock()
+end
 
 local function live()
     return latest and receivedAt and os.clock() - receivedAt < CFG.stale_seconds
@@ -394,6 +473,8 @@ local function drawData()
 end
 
 local function actionAllowed(action)
+    -- Gate actual command emission, not just button appearance.
+    if not panelUnlocked() then return false end
     if not live() then return false end
     if not policy().paired then return false end
     local trusted = false
@@ -447,6 +528,7 @@ local function requestCommand(action, desired)
 end
 
 local function nextLogic(step)
+    if not panelUnlocked() then return end
     local current=logicDraft or value("reactor","getLogicMode") or LOGIC_MODES[1]
     local index=1
     for i,v in ipairs(LOGIC_MODES) do if v==current then index=i;break end end
@@ -455,6 +537,7 @@ local function nextLogic(step)
 end
 
 local function shiftBurn(amount)
+    if not panelUnlocked() then return end
     local current=burnDraft or value("reactor","getBurnRate")
     if type(current)~="number" then return end
     local cap=policy().burnRateCap or value("reactor","getMaxBurnRate") or current
@@ -474,7 +557,8 @@ local function drawControl()
     writeAt(m,1,1,string.rep(" ",w),colors.white,colors.blue)
     writeAt(m,1,1,"TY / CONTROL",colors.white,colors.blue)
     writeAt(m,1,2,string.rep(" ",w),colors.lightGray,colors.gray)
-    writeAt(m,1,2,"#"..tostring(plantId or CFG.plant_id).." "..link,
+    writeAt(m,1,2,"#"..tostring(plantId or CFG.plant_id).." "..link..
+        (panelUnlocked() and " P:ON" or " P:LOCK"),
         live() and colors.lime or colors.orange,colors.gray)
 
     local function changeTab(tab)
@@ -582,9 +666,12 @@ local function drawControl()
     end
 
     -- Reserve the bottom two rows for the persistent command result.
-    local info=lastAck or "2-TAP / SCRAM 1"
-    if confirmCandidate then info="TAP SAME AGAIN TO CONFIRM" end
-    local alert=lastAck and lastAck:match("FAILED|LOCKED|NO ACK|ERROR|did not match")
+    local unlocked=panelUnlocked()
+    local info=unlocked and (lastAck or ("PANEL ON "..panelSeconds().."s"))
+        or "PANEL LOCKED - USE POCKET #6"
+    if unlocked and confirmCandidate then info="TAP SAME AGAIN TO CONFIRM" end
+    local alert=(not unlocked) or
+        (lastAck and lastAck:match("FAILED|LOCKED|NO ACK|ERROR|did not match"))
     writeAt(m,1,h-1,string.rep(" ",w),colors.white,colors.gray)
     writeAt(m,1,h,string.rep(" ",w),colors.white,colors.gray)
     writeAt(m,1,h-1,info:sub(1,w),alert and colors.orange or colors.cyan,colors.gray)
@@ -631,7 +718,13 @@ local timer=os.startTimer(0)
 drawData();drawControl()
 while true do
     local event,a,b,c=os.pullEvent()
-    if event=="rednet_message" and c==TELEMETRY and type(b)=="table"
+    if event=="rednet_message" and c==PANEL_CMD then
+        handlePanelCommand(a,b)
+        drawData();drawControl()
+    elseif event=="rednet_message" and c==PANEL_HEART then
+        handlePanelHeartbeat(a,b)
+        -- Heartbeat only updates panel validity; the regular timer refreshes UI.
+    elseif event=="rednet_message" and c==TELEMETRY and type(b)=="table"
         and b.version==1 and type(b.devices)=="table" then
         if (not CFG.plant_id or a==CFG.plant_id) and (not plantId or a==plantId) then
             plantId=a;latest=b;receivedAt=os.clock()
