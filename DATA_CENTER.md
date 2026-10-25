@@ -139,6 +139,37 @@ exit
 
 > 2026-10-24 平板更換：舊 Pocket #2 已遺失，新 Pocket #6 取代其遠端管理權限。新程式必須更新並重新啟動在資料中心 #0 的 `dc_center.lua` 才會生效；要從 Pocket 直接操作核分裂反應爐，還須於安全條件允許時更新核電廠 #3 的 `mek_send.lua`。GitHub 原始碼更新不等於遊戲內正在執行的程式已更新。
 
+## 基地控制面板的 Pocket 授權解鎖
+
+新版 `dc_remote.lua`、`dc_center.lua`、`mek_watch.lua` 支援「#6 授權、#4 操作、#3 保留設備安全限制」；**只更新程式原始碼不會改變目前運作中的分頁**。
+
+### 三台電腦部署（不修改核電廠 #3）
+
+1. **#0 資料中心**：從 CraftOS Shell 執行 `ty.lua update dc_center.lua`（必須是支援單檔的新版 `ty.lua`），成功後退出舊版 `dc>` 並重新從 Shell 啟動 `dc_center.lua`；原本的玩家登入狀態檔不修改，但執行中的工作階段需重新登入/信任裝置恢復。確認 `dc> auth status` 顯示 `Auth: ENABLED`。
+2. **#4 基地**：執行 `ty.lua update mek_watch.lua`，只更新監控與面板程式的磁碟版本。若基地目前**確定由 `dc_agent.lua` 管理該程式**，可在資料中心／Pocket 以既有 `restart 4` 重新載入；若目前是獨立 `mek_watch` 分頁，需只關閉舊分頁再執行 `bg mek_watch.lua`，**不得開啟第二份監控程式**。#4 重載只短暫影響基地顯示及控制，不改動核電廠。
+3. **#6 Pocket**：從 `pdc>` 退出後執行 `ty.lua update dc_remote.lua`，再重新啟動 `dc_remote.lua` 並確認管理員登入有效。
+
+如版本落後，`ty.lua update` 在新版只列出檔案；舊版忽略檔名可能更新全部，請先用 `ty.lua help` 檢查。不要為這項介面授權功能更新/重啟 `mek_send.lua`、整台核電廠或反應爐。
+
+### Pocket 命令與基地實際執行
+
+```text
+pdc> auth          # 確認已登入，且登入角色為 admin
+pdc> panel 4       # 預設 Base panel: LOCKED
+pdc> unlock 4      # 額外輸入大寫 UNLOCK
+pdc> panel 4       # 預期 UNLOCKED，剩餘授權秒數
+pdc> lock 4        # 額外輸入大寫 LOCK
+pdc> panel 4       # 預期 LOCKED
+```
+
+#0 只接受來源電腦 ID 6 且已驗證的 admin，檢查 #4 `ONLINE`、`Paired=YES` 且由 `dc_agent.lua` 回報為 `BASE`/ `mek_watch.lua`。訊息由 #0 轉發至 #4 的獨立 `panel_command` 協定；#4 回覆實際解鎖狀態，並於每次觸控送出前同時檢查**面板授權**與既有**核電廠控制政策**。基地右螢幕標題下方顯示 `P:LOCK` 或 `P:ON`；左側唯讀監控不受影響。
+
+授權只保存在 #4 目前執行中的記憶體，最多 **300 秒（5 分鐘）**，需要延長請重新由 Pocket 解鎖；基地若超過 **12 秒**未收到 #0 的身份驗證服務心跳、#0 重新啟動（服務版本識別碼更換）或 #4 監控程式重新啟動，會拒絕操作並清除未送出的二次確認。管理員發送 `$tyrevokeall`，資料中心會嘗試立即撤銷該管理員授權的面板；即使這個撤銷封包遺失，也仍有心跳超時及最長 300 秒的界線。遇到 `No panel ACK` 不得推定解鎖/上鎖已成功，應先使用 `panel 4` 重新查詢。
+
+**兩道鎖，不得混淆：** #4 面板解鎖本身不會修改 #3 `mek_send.lua` 的 `allow_remote_scram`、`allow_remote_activate`、`allow_remote_logic_mode`、`allow_remote_turbine_mode` 或 `max_allowed_burn_rate`。原本的全部預設限制仍在，必須另外於 #3 安全維護期間確認冷卻/回水/安全聯鎖及實測上限再選擇啟用。這次沒有關閉 `mek_pocket.lua` 舊有的直接控制介面，因此 **#4 面板上鎖只限制基地螢幕，不代表其他直接 Rednet 控制通道也鎖上**。面板遠端 SCRAM 也會隨面板上鎖，不能取代獨立的緊急停機。
+
+**網路風險：** Rednet 身分來自電腦 ID 和 #0 的現有登入 token，並無端對端加密或可靠的防偽來源驗證。只適合單人/完全可信任的私人世界。實機需驗證未登入、viewer、#4 離線、心跳中斷、授權到期/重啟與二次確認清除等情境，未經 ATM10 8.3 現場測試不應宣稱安全或完整驗收。
+
 ## 開機自動恢復（選用）
 
 資料中心 #0、核電廠 #3、基地 #4 可使用更新後的 `ty.lua boot on` 各自啟用開機服務。此指令不會在安裝當下中斷現有監控，也不會啟動或停止核分裂反應爐。#3、#4 的代理需支援新的持久化設定；安裝器會明確提示是否只更新代理程式的磁碟檔案。舊代理的目前執行實例不會被即時替換，要待下次重開機才能開始保留 `start`／`stop` 的意圖。首次仍需要在各台電腦本機啟用一次，不能透過尚未安裝此功能的舊代理遠端寫入開機腳本。完整指令與安全限制見 [INSTALLER.md](INSTALLER.md#開機自動恢復opt-in不會自動啟動反應爐)。
