@@ -10,6 +10,15 @@ local HOST = "ty.dc.v1:center"
 local REMOTE_REQ = "ty.dc.v1:remote_request"
 local REMOTE_RESP = "ty.dc.v1:remote_response"
 local REMOTE_ALLOWED = { [6] = true } -- legacy mode only, before auth enable
+-- Authenticated Pocket #6 authorizes BASE #4 control-panel use. #4 still
+-- enforces its own lease, while PLANT #3 retains all original control limits.
+local PANEL_CMD = "ty.dc.v1:panel_command"
+local PANEL_REPLY = "ty.dc.v1:panel_reply"
+local PANEL_HEART = "ty.dc.v1:panel_heartbeat"
+local PANEL_ACTIONS = {panel=true, unlock=true, lock=true}
+local PANEL_HEART_PERIOD = 3
+local panelGeneration = tostring(os.epoch("utc")) .. ":" .. tostring(os.getComputerID())
+local panelLastHeart, panelOwnerUUID = -math.huge, nil
 local auth = dofile("dc_auth.lua")
 local AUTH_REQ = auth.protocol()
 local known = { [6]="Pocket", [3]="Nuclear Plant", [4]="Base" }
@@ -102,9 +111,11 @@ local function onRemoteRequest(client, packet)
         or #packet.requestId > 48 or not packet.requestId:match("^[%w_:%-]+$")
         or type(packet.action) ~= "string" then return end
     local requestId, action = packet.requestId, packet.action
+    local authorizedUUID=nil
     if auth.enabled() then
         local allowed, reason = auth.authorize(client,packet.auth,action)
         if not allowed then remoteRespond(client,requestId,false,reason or "Login required");return end
+        authorizedUUID=allowed.uuid
         auth.audit(allowed.uuid,client,"remote:"..action,"accepted")
     end
     if action == "nodes" then
@@ -126,11 +137,18 @@ local function onRemoteRequest(client, packet)
         end
         return
     end
-    if not REMOTE_NODE_ACTIONS[action] then
+    local panelAction = PANEL_ACTIONS[action]==true
+    if not REMOTE_NODE_ACTIONS[action] and not panelAction then
         remoteRespond(client, requestId, false, "Action not allowed")
         return
     end
-    if action ~= "status" and packet.confirmed ~= true then
+    if panelAction and (target~=4 or client~=6 or not auth.enabled()
+        or not authorizedUUID) then
+        remoteRespond(client,requestId,false,
+            "Base panel requires authenticated admin Pocket #6 and target #4")
+        return
+    end
+    if action ~= "status" and action ~= "panel" and packet.confirmed ~= true then
         remoteRespond(client, requestId, false, "Confirmation required")
         return
     end
@@ -146,14 +164,27 @@ local function onRemoteRequest(client, packet)
         remoteRespond(client, requestId, false, "Node #" .. target .. " not paired to centre")
         return
     end
+    if panelAction and (nodes[target].role~="BASE" or
+        nodes[target].program~="mek_watch.lua") then
+        remoteRespond(client,requestId,false,"Target is not the paired base monitor")
+        return
+    end
     local agentId = "pc:" .. client .. ":" .. requestId
     remotePending = {
         client=client, requestId=requestId, agentRequestId=agentId,
         target=target, started=os.clock(),
+        kind=panelAction and "panel" or "agent",
+        action=action, ownerUUID=authorizedUUID,
     }
+    if panelAction and action=="unlock" then
+        -- Remember the authorizing player even if the ACK is lost, so a
+        -- later $tyrevokeall still attempts to revoke the lease.
+        panelOwnerUUID=authorizedUUID
+    end
     local sent = rednet.send(target, {
         version=1, requestId=agentId, action=action,
-    }, CMD)
+        generation=panelAction and panelGeneration or nil,
+    }, panelAction and PANEL_CMD or CMD)
     if not sent then
         remotePending = nil
         remoteRespond(client, requestId, false, "Modem failed to send command")
@@ -161,7 +192,7 @@ local function onRemoteRequest(client, packet)
 end
 local function onRemoteAgentReply(sender, message)
     local p = remotePending
-    if not p or sender ~= p.target or message.requestId ~= p.agentRequestId then
+    if not p or p.kind~="agent" or sender ~= p.target or message.requestId ~= p.agentRequestId then
         return false
     end
     remotePending = nil
@@ -178,6 +209,25 @@ local function onRemoteAgentReply(sender, message)
     remoteRespond(p.client, p.requestId, message.ok == true,
         tostring(message.message or "No message"), remoteInfo(sender))
     return true
+end
+local function onPanelReply(sender,message)
+    local p=remotePending
+    if not p or p.kind~="panel" or sender~=4 or p.target~=4
+        or type(message)~="table" or message.version~=1
+        or message.requestId~=p.agentRequestId
+        or message.generation~=panelGeneration
+        or message.action~=p.action then return end
+    remotePending=nil
+    if message.ok==true and p.action=="unlock" then
+        panelOwnerUUID=p.ownerUUID
+    elseif message.ok==true and p.action=="lock" then
+        panelOwnerUUID=nil
+    end
+    local seconds=tonumber(message.remainingSeconds) or 0
+    seconds=math.max(0,math.min(300,math.floor(seconds)))
+    remoteRespond(p.client,p.requestId,message.ok==true,
+        tostring(message.message or "No panel reply"),
+        {unlocked=message.unlocked==true,remainingSeconds=seconds})
 end
 
 -- Dedicated remote-terminal gateway. The operator must be Pocket #6.
@@ -317,15 +367,26 @@ local function receiveLoop()
                 pendingReply = { id=id, ok=msg.ok == true, message=msg.message, status=msg.status }
             elseif proto == REPLY and type(msg.requestId) == "string" then
                 onRemoteAgentReply(id, msg)
+            elseif proto == PANEL_REPLY and id==4 then
+                onPanelReply(id,msg)
             elseif proto == REMOTE_REQ then
                 onRemoteRequest(id, msg)
             end
+        end
+        -- Heartbeat is bound to this centre-process generation. A restarted
+        -- or unreachable centre causes BASE #4 to automatically re-lock.
+        if auth.enabled() and online(4) and nodes[4].pairedCenter==os.getComputerID()
+            and os.clock()-panelLastHeart>=PANEL_HEART_PERIOD then
+            panelLastHeart=os.clock()
+            rednet.send(4,{version=1,generation=panelGeneration},PANEL_HEART)
         end
         if remotePending and os.clock() - remotePending.started >= 9 then
             local p = remotePending
             remotePending = nil
             remoteRespond(p.client, p.requestId, false,
-                "No agent ACK within 9 seconds; execution state UNKNOWN. Use info.")
+                p.kind=="panel" and
+                "No panel ACK; lock state UNKNOWN. Query panel 4 before retrying."
+                or "No agent ACK within 9 seconds; execution state UNKNOWN. Use info.")
         end
     end
 end
@@ -428,6 +489,15 @@ local function consoleLoop()
     end
 end
 local function onAuthRevoke(uuid)
+    -- Revoke an active base-panel lease when its granting admin is revoked.
+    -- Base also re-locks on lease expiry, missing centre heartbeat or reboot.
+    if panelOwnerUUID==uuid then
+        panelOwnerUUID=nil
+        rednet.send(4,{
+            version=1,requestId="revoke:"..tostring(os.epoch("utc")),
+            action="lock",generation=panelGeneration,
+        },PANEL_CMD)
+    end
     for target,ses in pairs(terminalSessions) do
         if ses.uuid==uuid then
             rednet.send(target,{v=1,kind="close",sid=ses.sid,target=target},SHELL_HOST)
