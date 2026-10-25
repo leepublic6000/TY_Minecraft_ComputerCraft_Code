@@ -129,6 +129,26 @@ bg dc_shell_host.lua
 
 停止反應爐後，新建立的 `shell 3` 工作階段才可進入完整 CraftOS Shell；若完整 Shell 使用期間反應爐重新運轉，Host 會中斷該 Shell。若開啟時無法確認反應爐狀態，則直接拒絕連線。已有的受限工作階段不會因停機自動升級成完整權限，須先退出再重新連線。
 
+#### Pocket 快速打字延遲／漏字修正（運轉中的 #3）
+
+原本 `dc_shell_client.lua` 把 `key`、`key_up` 和每個 `char` 都經 Rednet 逐一送到 #0，再轉到 #3；文字必須等 Host 畫面回傳才顯示。這使跨維度或較繁忙的世界在快速打字時可能發生明顯延遲、漏字。
+
+新版只對 **`shell 3` 的 `LIVE LIMITED` 模式**調整輸入方式：
+
+- Pocket **本地即時編輯**：字元、退格、方向鍵、Home／End 不經 Rednet 往返；畫面在本地顯示輸入內容，**Enter** 才提交完整一行（最長 80 bytes，不允許換行或控制字元）。
+- 一行是一個原子 `line` 封包：#0 必須先驗證 admin 工作階段，再將通過長度與格式檢查的指令轉發給 #3；#3 只在已授權、仍處於 `LIVE LIMITED` 的工作階段內佇列並執行，既有受限命令白名單不變。
+- Host 收到完整行後傳送 `line_ack`；Pocket 等待 ACK，如果沒有收到會使用**相同的序號與完整指令**有限次重送，Host 去重，避免重複執行。序號按工作階段重置，Host 最多暫存 8 行，超額拒絕。
+- `line_ack` **只表示 Host 收到並排入佇列，不保證指令已完成**；仍要依畫面的實際回覆確認。遇到 `NO LINE ACK` 或連線失效時，不要立刻重新發送有副作用的命令，先確認現場狀態。
+- 停機後的完整 Shell 及基地 #4 Shell 保留既有鍵盤事件行為，本次沒有更動它們的輸入協定。
+
+**三端必須更新到同一協定版本**，否則新客戶端會顯示 `SENDING` 而沒有 `line_ack`。在不停止反應爐／`mek_send.lua` 的前提下依序：
+
+1. #0 的 Shell：`ty.lua update dc_center.lua`，退出舊 `dc>` 後重新啟動 `dc_center.lua`（更新磁碟不會自動更換正在執行的中心）。重啟 #0 管理中心會清除暫時登入工作階段，Pocket 需重新登入／恢復信任裝置。
+2. #3 的**本機獨立 Shell**：`ty.lua update dc_shell_host.lua`，**僅重新啟動 `dc_shell_host.lua` 本身**，不要重啟 `dc_agent.lua`、`mek_send.lua`、反應爐或 Minecraft 電腦，也不要保留兩個 Host 分頁。遠端管理中的自我更新只更新磁碟，不能讓原本執行中的 Host 自動載入新版。
+3. #6 的 Shell：`ty.lua update dc_shell_client.lua`，離開舊版 `pdc>`／Shell 客戶端後重新執行 `dc_remote.lua`、確認管理員登入，再用 `pdc> shell 3`。
+
+**驗收**：在 `LIVE LIMITED` 的 `plant>` 快速輸入 `help` 或 `config`，鍵盤輸入應立即在 Pocket 出現（尚未按 Enter 時不發送），按 Enter 後應看到遠端輸出且只執行一次。可用退格及左右鍵編輯後驗證內容。斷網或未收到 ACK 應明確顯示狀態，而不是默默吞字。此流程目前仍待 ATM10 8.3 實機驗證，不能宣稱已達固定的毫秒延遲。
+
 ## 停用、錯誤與驗收
 
 - 目標電腦本機 `dc_shell_host.lua status` 可檢查是否啟用。`dc_shell_host.lua disable` 輸入 `DISABLE` 後，會移除本功能自己的開機啟動檔與啟用旗標，不停止既有核電廠／基地監控；現行遠端 Shell 於下一輪事件檢查後停止。
