@@ -1,6 +1,8 @@
 -- TY Remote Shell Host / CC:Tweaked. Run in its own Multishell tab.
--- A real, isolated CraftOS shell: screen buffer and events stay inside this tab.
--- Rednet is NOT authenticated; use only in a trusted private game world.
+-- A real CraftOS shell on #4 (and stopped #3); running #3 gets a fixed,
+-- restricted management console instead of arbitrary Lua or file editing.
+-- Login is checked by #0. Rednet is NOT cryptographically authenticated;
+-- use only in a trusted private game world.
 local arg = {...}
 local id = os.getComputerID()
 local CENTER, POCKET = 0, 6
@@ -21,12 +23,16 @@ end
 local function enabled()
     return content(ENABLE) == "enabled\n"
 end
+local function plantState()
+    if id~=3 then return "N/A" end
+    local r=peripheral.find("fissionReactorLogicAdapter")
+    if not r or type(r.getStatus)~="function" then return "UNKNOWN" end
+    local ok,active=pcall(r.getStatus)
+    if not ok or type(active)~="boolean" then return "UNKNOWN" end
+    return active and "RUNNING" or "STOPPED"
+end
 local function stoppedReactor()
-    if id ~= 3 then return true end
-    local r = peripheral.find("fissionReactorLogicAdapter")
-    if not r or type(r.getStatus) ~= "function" then return false end
-    local ok, active = pcall(r.getStatus)
-    return ok and active == false
+    return id~=3 or plantState()=="STOPPED"
 end
 local function configuredStartup()
     local s=content(HOOK)
@@ -39,8 +45,10 @@ end
 if arg[1] == "enable" then
     assert(id==0 or id==3 or id==4,"Only centre/plant/base computers may host remote shells")
     if id == 3 then
-        assert(stoppedReactor(),"PLANT LOCK: reactor must be confirmed STOPPED")
-        print("WARNING: full Shell can bypass reactor control policy; maintenance only.")
+        assert(plantState()~="UNKNOWN","PLANT LOCK: reactor state unavailable")
+        print("Plant #3: verified Pocket admin required for ALL remote access.")
+        print("RUNNING: restricted management only, NO arbitrary Shell or reactor commands.")
+        print("STOPPED: full Shell permitted for planned maintenance.")
         if not confirm("PLANT") then print("Cancelled"); return end
     else
         if not confirm("ENABLE") then print("Cancelled"); return end
@@ -72,7 +80,13 @@ elseif arg[1] == "disable" then
 elseif arg[1] == "status" then
     print("Computer #" .. id .. ": " .. (enabled() and "ENABLED" or "DISABLED"))
     print("Boot hook: " .. tostring(configuredStartup()))
-    print("Reactor permitted: " .. tostring(stoppedReactor()))
+    if id==3 then
+        print("Reactor state: "..plantState())
+        print("Running mode: VERIFIED RESTRICTED MANAGEMENT")
+        print("Stopped mode: VERIFIED FULL SHELL")
+    else
+        print("Full Shell permitted: "..tostring(stoppedReactor()))
+    end
     return
 elseif arg[1] ~= nil then
     error("Usage: dc_shell_host.lua [enable | disable | status]")
@@ -114,25 +128,110 @@ local function resumeShell(...)
         waiting=nextFilter
     end
 end
-local function startSession(packet)
+-- While the reactor is running, input is parsed as a small fixed command
+-- language. Never hand its input to CraftOS shell, eval, edit, os.run or
+-- a user-specified program. Updates target only the management files on disk.
+local LIVE_FILES={
+    ["ty.lua"]=true,["dc_agent.lua"]=true,["dc_shell_host.lua"]=true,
+}
+local function liveConfig()
+    local text=content("mek_send.lua")
+    if not text then print("mek_send.lua missing / unreadable");return end
+    local found,n=false,0
+    for line in (text.."\n"):gmatch("([^\n]*)\n") do
+        if line:match("^local CFG%s*=") then found=true end
+        if found then
+            print(line)
+            n=n+1
+            if line:match("^}%s*$") or n>=40 then break end
+        end
+    end
+    if not found then print("No local CFG section found") end
+    print("Disk file ONLY; active service may still use older settings.")
+end
+local function liveStatus()
+    print("Plant #3: "..plantState())
+    local r=peripheral.find("fissionReactorLogicAdapter")
+    if r then
+        for _,method in ipairs({"getTemperature","getBurnRate","getActualBurnRate"}) do
+            if type(r[method])=="function" then
+                local ok,v=pcall(r[method])
+                print(method..": "..(ok and tostring(v) or "UNAVAILABLE"))
+            end
+        end
+    end
+    print("Management does not start/stop or change the reactor.")
+end
+local function liveConsole()
+    print("TY PLANT #3 / VERIFIED ADMIN")
+    print("Reactor ONLINE: RESTRICTED maintenance terminal")
+    print("No arbitrary Shell, no editing plant control files.")
+    print("Type help for approved commands.")
+    while true do
+        write("plant> ")
+        local input=read()
+        if type(input)~="string" then return end
+        local cmd=input:match("^%s*(.-)%s*$")
+        if #cmd>80 then
+            print("Command too long")
+        elseif cmd=="exit" or cmd=="quit" then
+            return
+        elseif cmd=="help" then
+            print("status / config / ls")
+            print("boot status | boot on | boot off")
+            print("check <ty.lua|dc_agent.lua|dc_shell_host.lua>")
+            print("update <ty.lua|dc_agent.lua|dc_shell_host.lua>")
+            print("exit - disconnect")
+            print("NO mek_send update, reactor API, lua or edit.")
+        elseif cmd=="status" then
+            liveStatus()
+        elseif cmd=="config" then
+            liveConfig()
+        elseif cmd=="ls" then
+            for _,name in ipairs({"mek_send.lua","ty.lua","dc_agent.lua",
+                "dc_shell_host.lua","startup/ty_managed.lua"}) do
+                local exists=fs.exists(name) and not fs.isDir(name)
+                print(name.." "..(exists and (tostring(fs.getSize(name)).." bytes") or "MISSING"))
+            end
+        elseif cmd=="boot status" or cmd=="boot on" or cmd=="boot off" then
+            local sub=cmd:sub(6)
+            if fs.exists("ty.lua") then shell.run("ty.lua","boot",sub)
+            else print("ty.lua missing") end
+        else
+            local action,name=cmd:match("^(check)%s+(%S+)$")
+            if not action then action,name=cmd:match("^(update)%s+(%S+)$") end
+            if action and LIVE_FILES[name] then
+                if not fs.exists("ty.lua") then print("ty.lua missing")
+                else shell.run("ty.lua",action,name) end
+            else
+                print("DENIED: command not on live-plant allowlist. Type help.")
+            end
+        end
+    end
+end
+local function startSession(packet, mode)
     local w = math.max(16,math.min(MAX_W,math.floor(packet.w or 26)))
     local h = math.max(8,math.min(MAX_H,math.floor(packet.h or 16)))
     buffer=window.create(term.current(),1,1,w,h,false)
-    session={sid=packet.sid,opened=os.clock(),last=os.clock(),w=w,h=h}
+    session={sid=packet.sid,opened=os.clock(),last=os.clock(),w=w,h=h,mode=mode}
     -- IMPORTANT: inherit the current parent shell: an isolated top-level shell
     -- with no parent would rerun /rom/startup.lua and duplicate startup services.
     assert(type(shell)=="table" and type(shell.run)=="function",
         "A parent Shell API is required; run this in a CraftOS shell tab")
     shellThread=coroutine.create(function()
-        -- Suppress multishell access inside the remote session so remote
-        -- programs do not create visible tabs on the controlled computer.
-        os.run({shell=shell, multishell=false}, "/rom/programs/shell.lua")
+        if mode=="live" then
+            liveConsole() -- allowlisted operations only
+        else
+            -- Stopped plant (or base #4): ordinary isolated CraftOS shell.
+            -- Do not rerun startup or create foreground tabs on the target.
+            os.run({shell=shell, multishell=false}, "/rom/programs/shell.lua")
+        end
     end)
     waiting=nil
     screenPrevious={}
     cursorPrevious=""
     resumeShell()
-    if session then response({kind="opened",sid=session.sid,w=w,h=h}) end
+    if session then response({kind="opened",sid=session.sid,w=w,h=h,mode=mode}) end
 end
 local INPUTS={key=true,key_up=true,char=true,paste=true,mouse_click=true,
     mouse_up=true,mouse_drag=true,mouse_scroll=true}
@@ -169,14 +268,22 @@ local function handle(packet)
         if centreLoginIsRequired() then
             response({kind="error",sid=packet.sid,reason="Centre #0 Shell disabled during player-auth mode"});return
         end
-        if not stoppedReactor() then
-            response({kind="error",sid=packet.sid,reason="PLANT LOCK: reactor must be STOPPED"});return
+        if id==3 and packet.verifiedAdmin~=true then
+            response({kind="error",sid=packet.sid,reason="PLANT LOCK: verified admin required"});return
+        end
+        local mode="full"
+        if id==3 then
+            local state=plantState()
+            if state=="UNKNOWN" then
+                response({kind="error",sid=packet.sid,reason="PLANT LOCK: reactor state UNKNOWN"});return
+            end
+            mode=state=="RUNNING" and "live" or "full"
         end
         if session then
             response({kind="error",sid=packet.sid,reason="Remote shell is busy"});return
         end
         if type(packet.w)~="number" or type(packet.h)~="number" then return end
-        startSession(packet)
+        startSession(packet, mode)
         return
     end
     if not session or packet.sid~=session.sid then return end
@@ -208,7 +315,7 @@ end
 openRadio()
 print("TY Remote Shell Host #"..id.." | Ctrl+T to stop")
 print("Centre: #0, operator: Pocket #6; trusted private world ONLY")
-if id==3 then print("Plant shells operate ONLY while reactor reports STOPPED") end
+if id==3 then print("Plant #3: verified admin, LIVE RESTRICTED / STOPPED FULL Shell") end
 local tick=os.startTimer(0.3)
 while true do
     local event,a,b,c=os.pullEventRaw()
@@ -219,8 +326,10 @@ while true do
         if not enabled() then closeSession("Remote host disabled"); break end
         if session and id==0 and centreLoginIsRequired() then
             closeSession("Centre player-auth mode enabled; direct Shell closed")
-        elseif session and id==3 and not stoppedReactor() then
-            closeSession("Plant reactor no longer stopped")
+        elseif session and id==3 and plantState()=="UNKNOWN" then
+            closeSession("Plant reactor state UNKNOWN")
+        elseif session and id==3 and session.mode=="full" and not stoppedReactor() then
+            closeSession("Plant started: full Shell terminated")
         elseif session and os.clock()-session.last>45 then
             closeSession("Remote session expired")
         else
