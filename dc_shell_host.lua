@@ -287,6 +287,12 @@ local function handle(packet)
         return
     end
     if not session or packet.sid~=session.sid then return end
+    -- A stopped-only full Shell must not process even one more key if
+    -- the plant has started since the previous timer check.
+    if id==3 and session.mode=="full" and not stoppedReactor() then
+        closeSession("Plant started: full Shell terminated")
+        return
+    end
     session.last=os.clock()
     if packet.kind=="close" then closeSession("Client disconnected")
     elseif packet.kind=="input" then inject(packet)
