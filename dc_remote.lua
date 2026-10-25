@@ -138,7 +138,7 @@ local function help()
     print("nodes          list all nodes")
     print("info <id>      show node status")
     print("status <id>    request fresh status")
-    print("shell <id>     open full remote CraftOS terminal")
+    print("shell <id>     #3: verified live admin or stopped full Shell")
     print("update <id>    update node app")
     print("start <id>     start node app")
     print("stop <id>      stop node app")
@@ -193,8 +193,12 @@ while true do
         local target = tonumber(arg)
         if target~=0 and target~=3 and target~=4 then
             print("Usage: shell <0|3|4>")
+        elseif target==3 and (not authRequired or not authSession or os.getComputerID()~=6) then
+            print("Plant #3 requires verified admin Pocket #6 and centre auth enabled.")
+            print("Type login (or restore trusted Pocket session) first.")
         elseif fs.exists("dc_shell_client.lua") then
-            print("Remote shell is high-privilege; private worlds only.")
+            print("Remote access is for trusted private worlds only.")
+            if target==3 then print("RUNNING plant: restricted maintenance; STOPPED: full Shell.") end
             shell.run("dc_shell_client.lua", tostring(target), authSession or "")
         else
             print("dc_shell_client.lua missing: run ty.lua install on Pocket")
