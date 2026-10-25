@@ -123,9 +123,28 @@ bg dc_shell_host.lua
 | `boot status`、`boot on`、`boot off` | 執行現有 `ty.lua` 的開機恢復管理，保留原本確認機制 |
 | `check ty.lua`、`check dc_agent.lua`、`check dc_shell_host.lua` | 只檢查指定管理檔案是否需更新 |
 | `update ty.lua`、`update dc_agent.lua`、`update dc_shell_host.lua` | **只替換白名單管理檔案的磁碟版本**；需原本更新確認，不會重啟目前的服務 |
+| `reload host` | **僅重新載入 `dc_shell_host.lua`**：需另外輸入大寫 `RELOAD`，檢查新版檔案後關閉此次遠端工作階段，在原來的 Host 分頁啟動新版；不重啟反應爐或 `mek_send.lua` |
 | `exit` | 結束管理工作階段 |
 
 所有其他輸入（例如 `lua`、`edit`、`shell`、`wget`、`update mek_send.lua`、`update all`、`restart 3`）**拒絕執行**。不透過受限終端直接啟動、關閉、設定燃燒率或變更安全模式；需要這些功能仍須遵循核電廠既有獨立授權與安全檢查。不能透過登入身分繞過反應爐安全設定。
+
+#### 運轉中遠端更新並重新載入 Host（一次本機啟用後）
+
+`reload host` 是加入在 **2026-10-25 新版** `dc_shell_host.lua` 的指令；它**不會自動出現在已執行中的舊 Host**。如果 Pocket 已執行 `plant> update dc_shell_host.lua`，畫面出現 `Installed` 和 `Running programs are NOT automatically restarted`，代表**只更新了磁碟**，目前仍無法從舊版工作階段輸入新指令。這種情況第一次必須在 #3 本機獨立 `shell` 分頁：關閉**僅** `dc_shell_host` 的舊分頁（`Ctrl+T`），再 `bg dc_shell_host.lua`；不可停止 `dc_agent`、`mek_send`、整台電腦或反應爐。
+
+完成這**一次** Host 新版載入後，以後可直接從已驗證管理員的 Pocket #6：
+
+```text
+pdc> shell 3
+plant> update dc_shell_host.lua
+# 出現替換確認時輸入 YES；若 Up to date 可略過
+plant> reload host
+# 額外輸入 RELOAD
+```
+
+`reload host` 會先確認目前 #3 反應爐狀態可讀、Host 仍啟用、磁碟上的 `dc_shell_host.lua` 含有新版重新載入支援且**通過 Lua 語法編譯**，再發出工作階段關閉通知，停止舊 Host 的事件迴圈，**在同一個 Host Multishell 分頁**執行更新後的 `dc_shell_host.lua`；不額外開一個 Host 分頁。若新版立即報錯，原版程式會嘗試在記憶體中恢復原本的 Host 事件迴圈；這是程式設計上的後備機制，尚未經遊戲實測，不可視為零風險保證。連線會中斷，請返回 `pdc>` 再 `shell 3`，確認 `LIVE LIMITED`／`plant>` 可以正常顯示。新 Host 若退出或錯誤，應回到 #3 本機檢查，不能假設重連一定成功。
+
+`reload host` **不能**替代 #0 的 `dc_center.lua` 重新載入，也不能重啟 #3 的 `dc_agent.lua` 或 `mek_send.lua`，因此三端輸入協定更新仍需先處理 #0，最後才更新 Pocket #6。
 
 停止反應爐後，新建立的 `shell 3` 工作階段才可進入完整 CraftOS Shell；若完整 Shell 使用期間反應爐重新運轉，Host 會中斷該 Shell。若開啟時無法確認反應爐狀態，則直接拒絕連線。已有的受限工作階段不會因停機自動升級成完整權限，須先退出再重新連線。
 
@@ -144,10 +163,10 @@ bg dc_shell_host.lua
 **三端必須更新到同一協定版本**，否則新客戶端會顯示 `SENDING` 而沒有 `line_ack`。在不停止反應爐／`mek_send.lua` 的前提下依序：
 
 1. #0 的 Shell：`ty.lua update dc_center.lua`，退出舊 `dc>` 後重新啟動 `dc_center.lua`（更新磁碟不會自動更換正在執行的中心）。重啟 #0 管理中心會清除暫時登入工作階段，Pocket 需重新登入／恢復信任裝置。
-2. #3 的**本機獨立 Shell**：`ty.lua update dc_shell_host.lua`，**僅重新啟動 `dc_shell_host.lua` 本身**，不要重啟 `dc_agent.lua`、`mek_send.lua`、反應爐或 Minecraft 電腦，也不要保留兩個 Host 分頁。遠端管理中的自我更新只更新磁碟，不能讓原本執行中的 Host 自動載入新版。
+2. #3 的 Host：若目前已載入具有 `reload host` 的新版，可在 Pocket `plant> update dc_shell_host.lua` 後輸入 `reload host`、再輸入 `RELOAD`，只遠端重新載入 Host；**若還在舊版執行中，須依上方步驟先在 #3 本機重新啟動 Host 一次**。不要重啟 `dc_agent.lua`、`mek_send.lua`、反應爐或整台電腦，也不要保留兩個 Host 分頁。
 3. #6 的 Shell：`ty.lua update dc_shell_client.lua`，離開舊版 `pdc>`／Shell 客戶端後重新執行 `dc_remote.lua`、確認管理員登入，再用 `pdc> shell 3`。
 
-**驗收**：在 `LIVE LIMITED` 的 `plant>` 快速輸入 `help` 或 `config`，鍵盤輸入應立即在 Pocket 出現（尚未按 Enter 時不發送），按 Enter 後應看到遠端輸出且只執行一次。可用退格及左右鍵編輯後驗證內容。斷網或未收到 ACK 應明確顯示狀態，而不是默默吞字。此流程目前仍待 ATM10 8.3 實機驗證，不能宣稱已達固定的毫秒延遲。
+**驗收**：在 `LIVE LIMITED` 的 `plant>` 快速輸入 `help` 或 `config`，鍵盤輸入應立即在 Pocket 出現（尚未按 Enter 時不發送），按 Enter 後應看到遠端輸出且只執行一次。可用退格及左右鍵編輯後驗證內容。斷網或未收到 ACK 應明確顯示狀態，而不是默默吞字。接著可從 `plant> help` 確認列出 `reload host`；後續無差異更新時可由此指令驗證 Host 重連。此流程目前仍待 ATM10 8.3 實機驗證，不能宣稱已達固定的毫秒延遲。
 
 ## 停用、錯誤與驗收
 
