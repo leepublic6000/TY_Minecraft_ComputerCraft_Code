@@ -83,7 +83,10 @@ local function message(e,a,b,c)
     if e~="rednet_message" or a~=center or c~=incoming or type(b)~="table"
         or b.v~=1 or b.target~=target or b.sid~=sid then return end
     lastSeen=os.clock()
-    if b.kind=="opened" then opened=true;status="CONNECTED";draw()
+    if b.kind=="opened" then
+        opened=true
+        status=b.mode=="live" and "LIVE LIMITED" or "FULL SHELL"
+        draw()
     elseif b.kind=="frame" then applyFrame(b)
     elseif b.kind=="error" or b.kind=="closed" then
         status=tostring(b.reason or b.kind):sub(1,45)
