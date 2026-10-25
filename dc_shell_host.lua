@@ -213,7 +213,8 @@ local function startSession(packet, mode)
     local w = math.max(16,math.min(MAX_W,math.floor(packet.w or 26)))
     local h = math.max(8,math.min(MAX_H,math.floor(packet.h or 16)))
     buffer=window.create(term.current(),1,1,w,h,false)
-    session={sid=packet.sid,opened=os.clock(),last=os.clock(),w=w,h=h,mode=mode}
+    session={sid=packet.sid,opened=os.clock(),last=os.clock(),w=w,h=h,
+        mode=mode,lastLineSeq=0,lineQueue={}}
     -- IMPORTANT: inherit the current parent shell: an isolated top-level shell
     -- with no parent would rerun /rom/startup.lua and duplicate startup services.
     assert(type(shell)=="table" and type(shell.run)=="function",
@@ -249,6 +250,51 @@ local function inject(packet)
         end
     end
     resumeShell(packet.event,table.unpack(a))
+end
+-- Receive whole lines atomically for LIVE LIMITED mode. A command is queued
+-- once and acknowledged, so repeated packets after a lost ACK are harmless.
+-- Input is only replayed when the managed coroutine is waiting for an event;
+-- HTTP downloads or other filtered waits cannot consume and drop typed text.
+local function flushLiveLines()
+    while session and session.mode=="live" and waiting==nil
+        and #session.lineQueue>0 do
+        local entry=session.lineQueue[1]
+        if not entry.pasted then
+            entry.pasted=true
+            if #entry.text>0 then resumeShell("paste",entry.text) end
+        else
+            table.remove(session.lineQueue,1)
+            if session then resumeShell("key",keys.enter) end
+        end
+    end
+end
+local function acceptLiveLine(packet)
+    if not session or session.mode~="live" then return end
+    local seq,txt=packet.seq,packet.line
+    if type(seq)~="number" or seq<1 or seq>100000000
+        or seq~=math.floor(seq) or type(txt)~="string"
+        or #txt>80 or txt:find("[%c]") then
+        response({kind="line_reject",sid=session.sid,seq=seq,
+            reason="Invalid live command line"})
+        return
+    end
+    if seq==session.lastLineSeq then
+        response({kind="line_ack",sid=session.sid,seq=seq})
+        return
+    elseif seq<session.lastLineSeq then
+        response({kind="line_reject",sid=session.sid,seq=seq,
+            reason="Stale command sequence"})
+        return
+    end
+    if #session.lineQueue>=8 then
+        response({kind="line_reject",sid=session.sid,seq=seq,
+            reason="Input queue full; retry after prompt"})
+        return
+    end
+    session.lastLineSeq=seq
+    session.lineQueue[#session.lineQueue+1]={text=txt,pasted=false}
+    response({kind="line_ack",sid=session.sid,seq=seq})
+    flushLiveLines()
 end
 -- When player authentication is enabled, prohibit direct #6 -> #0 Shell.
 -- Such a direct channel bypasses the data-centre authentication gateway.
@@ -296,6 +342,7 @@ local function handle(packet)
     session.last=os.clock()
     if packet.kind=="close" then closeSession("Client disconnected")
     elseif packet.kind=="input" then inject(packet)
+    elseif packet.kind=="line" then acceptLiveLine(packet)
     elseif packet.kind=="ping" then response({kind="pong",sid=session.sid}) end
 end
 local function sendFrame()
@@ -350,6 +397,7 @@ while true do
             and event~="mouse_click" and event~="mouse_up" and event~="mouse_drag"
             and event~="mouse_scroll" and event~="terminate" then
             resumeShell(event,a,b,c)
+            flushLiveLines()
         end
     end
 end
