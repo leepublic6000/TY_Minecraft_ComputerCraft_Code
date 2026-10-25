@@ -146,6 +146,12 @@ local function handlePanelCommand(sender,request)
         or #request.generation<1 or #request.generation>80 then return end
     local action=request.action
     if action=="unlock" then
+        -- Reject a delayed grant from a previous centre process after a
+        -- new-generation heartbeat has already arrived.
+        if panelCentreGeneration and request.generation~=panelCentreGeneration then
+            sendPanelReply(request,false,"Centre generation mismatch; try again")
+            return
+        end
         -- Trust only centre #0's brokered admin grant, never Pocket ID or
         -- arbitrary reactor commands. Grant duration is determined LOCALLY.
         panelLeaseGeneration=request.generation
