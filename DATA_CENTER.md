@@ -166,9 +166,21 @@ pdc> panel 4       # 預期 LOCKED
 
 授權只保存在 #4 目前執行中的記憶體，最多 **300 秒（5 分鐘）**，需要延長請重新由 Pocket 解鎖；基地若超過 **12 秒**未收到 #0 的身份驗證服務心跳、#0 重新啟動（服務版本識別碼更換）或 #4 監控程式重新啟動，會拒絕操作並清除未送出的二次確認。管理員發送 `$tyrevokeall`，資料中心會嘗試立即撤銷該管理員授權的面板；即使這個撤銷封包遺失，也仍有心跳超時及最長 300 秒的界線。遇到 `No panel ACK` 不得推定解鎖/上鎖已成功，應先使用 `panel 4` 重新查詢。
 
-**兩道鎖，不得混淆：** #4 面板解鎖本身不會修改 #3 `mek_send.lua` 的 `allow_remote_scram`、`allow_remote_activate`、`allow_remote_logic_mode`、`allow_remote_turbine_mode` 或 `max_allowed_burn_rate`。原本的全部預設限制仍在，必須另外於 #3 安全維護期間確認冷卻/回水/安全聯鎖及實測上限再選擇啟用。這次沒有關閉 `mek_pocket.lua` 舊有的直接控制介面，因此 **#4 面板上鎖只限制基地螢幕，不代表其他直接 Rednet 控制通道也鎖上**。面板遠端 SCRAM 也會隨面板上鎖，不能取代獨立的緊急停機。
+**兩道鎖，不得混淆：** #4 面板解鎖本身不會修改 #3 `mek_send.lua` 的 `allow_remote_scram`、`allow_remote_activate`、`allow_remote_logic_mode`、`allow_remote_turbine_mode` 或 `max_allowed_burn_rate`。原本的全部預設限制仍在，必須另外於 #3 安全維護期間確認冷卻/回水/安全聯鎖及實測上限再選擇啟用。GitHub 新版 `mek_send.lua` 已把控制指令來源限為基地 #4，`mek_pocket.lua` 已改成純唯讀；**目前執行中的 #3 若尚未重新載入新版，仍使用舊的權限規則**。Rednet sender ID 白名單無法抵禦能偽冒 ID 的惡意程式。面板遠端 SCRAM 也會隨面板上鎖，不能取代獨立的緊急停機。
 
 **網路風險：** Rednet 身分來自電腦 ID 和 #0 的現有登入 token，並無端對端加密或可靠的防偽來源驗證。只適合單人/完全可信任的私人世界。實機需驗證未登入、viewer、#4 離線、心跳中斷、授權到期/重啟與二次確認清除等情境，未經 ATM10 8.3 現場測試不應宣稱安全或完整驗收。
+
+## 下一階段：核電廠 #3 基地專屬控制指令
+
+已提交 GitHub：
+
+- `mek_send.lua`：`processCommand()` 僅處理基地 Computer #4 發出的控制指令；`controlPolicy.controllerIds` 僅列出 #4。Pocket #6 的監控資料接收不受影響。
+- `mek_pocket.lua`：第六頁從直接反應爐控制改成唯讀 `ACCESS` 說明，前五頁監控資料保留。平板管理員仍在 `dc_remote.lua` 使用 `unlock 4`／`lock 4`。
+- 安全預設仍是 `allow_remote_scram=false`、`allow_remote_activate=false`、`allow_remote_logic_mode=false`、`allow_remote_turbine_mode=false`、`max_allowed_burn_rate=nil`。更新本身不會授權任何操作。
+
+**部署界線**：#3 反應爐運轉時，既有 `ty.lua update mek_send.lua` 會拒絕更新。等待既定安全停機時，先保留本機 `mek_send.lua` 的自訂安全 CFG，再於 #3 本機更新，重新檢查/設定安全上限後，才在監控可安全中斷時重新載入程式。GitHub 預設設定是全鎖定，更新會覆蓋手動修改的 CFG，切勿不核對現場就複製舊的燃燒率上限。Pocket #6 可先執行 `ty.lua update mek_pocket.lua`，並重新載入純唯讀監控介面，與核電廠運作互不干擾。
+
+**遠端反應爐控制仍非端對端強式認證**：#3 只檢查 Rednet 來源電腦 ID #4，不能抵禦能偽冒該 ID 的不可信玩家；基地面板上鎖也會停用螢幕上的 SCRAM，仍應保有獨立硬體/紅石停機措施。
 
 ## 開機自動恢復（選用）
 
