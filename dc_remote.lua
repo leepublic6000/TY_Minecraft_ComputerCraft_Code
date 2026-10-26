@@ -6,6 +6,9 @@
 local CENTRE_ID = 0
 local REQUEST = "ty.dc.v1:remote_request"
 local RESPONSE = "ty.dc.v1:remote_response"
+-- Read-only presence beacon for the data-centre's local Advanced Monitor.
+-- It means this authenticated PDC app is active, NOT Pocket power state.
+local PRESENCE = "ty.dc.v1:pocket_presence"
 local TIMEOUT = 12
 local CHANGES = { update=true, start=true, stop=true, restart=true,
                   unlock=true, lock=true }
@@ -176,6 +179,7 @@ else
 end
 print("For approved programs only; no reactor control bypass")
 help()
+local function remoteConsole()
 while true do
     write("pdc> ")
     local line = read()
@@ -266,5 +270,22 @@ while true do
     elseif action then
         print("Unknown command; type help")
     end
+end
+end
+local function presenceBeacon()
+    -- This is deliberately not an agent/service heartbeat. Do not make the
+    -- centre claim the Pocket is online unless the authenticated app reports.
+    while true do
+        if os.getComputerID()==6 and authRequired and authSession then
+            rednet.send(CENTRE_ID,{version=1,kind="pdc_alive",
+                auth=authSession},PRESENCE)
+        end
+        sleep(3)
+    end
+end
+if os.getComputerID()==6 then
+    parallel.waitForAny(remoteConsole,presenceBeacon)
+else
+    remoteConsole()
 end
 print("Pocket remote closed")
