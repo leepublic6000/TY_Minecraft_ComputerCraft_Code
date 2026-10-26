@@ -1,22 +1,16 @@
 -- TY Minecraft ComputerCraft Code / ATM10 8.3
--- POCKET COMPUTER #6: read the full reactor/turbine telemetry and send
--- optional manual commands to plant #3. No automatic reactor control.
+-- POCKET COMPUTER #6: full READ-ONLY reactor/turbine telemetry.
+-- Only the verified dc_remote.lua admin app may unlock BASE #4's panel.
+-- Reactor control commands originate from BASE #4, never this Pocket viewer.
 
 local CFG = {
     plant_id = 3,
     stale_seconds = 5,
 }
 local DATA = "ty_mek_control_v1:data"
-local COMMAND = "ty_mek_control_v1:command"
-local REPLY = "ty_mek_control_v1:reply"
-local PAGES = { "SUMMARY", "REACTOR", "TURBINE", "ERRORS", "METHODS", "CONTROL" }
-local DUMP_MODES = { "IDLE", "DUMPING_EXCESS", "DUMPING" }
-local LOGIC_MODES = {
-    "DISABLED", "TEMPERATURE", "CRITICAL_WASTE_LEVEL",
-    "DAMAGED", "DEPLETED", "ACTIVATION"
-}
+local PAGES = { "SUMMARY", "REACTOR", "TURBINE", "ERRORS", "METHODS", "ACCESS" }
 local currentPage, scroll = 1, 0
-local latest, receivedAt, pending, notice = nil, nil, nil, "Waiting for plant"
+local latest, receivedAt = nil, nil
 local touchZones = {}
 
 local function openModem()
@@ -42,26 +36,6 @@ local function value(kind, method)
 end
 local function policy()
     return (latest and latest.controlPolicy) or {}
-end
-local function trusted()
-    for _, id in ipairs(policy().controllerIds or {}) do
-        if id == os.getComputerID() then return true end
-    end
-    return false
-end
-local function can(action)
-    if not live() or not trusted() then return false end
-    local kind = action == "setDumpingMode" and "turbine" or "reactor"
-    local d = device(kind)
-    if not d or not d.present or not d.values or d.values.isFormed ~= true then
-        return false
-    end
-    if action == "scram" then return policy().scram == true end
-    if action == "activate" then return policy().activate == true end
-    if action == "setBurnRate" then return type(policy().burnRateCap) == "number" end
-    if action == "setLogicMode" then return policy().logicMode == true end
-    if action == "setDumpingMode" then return policy().turbineMode == true end
-    return false
 end
 local function keysSorted(t)
     local result = {}
@@ -114,20 +88,28 @@ local function rows()
             "Dump: " .. format("getDumpingMode", value("turbine", "getDumpingMode")),
         }
     end
-    if page == "CONTROL" then
+    if page == "ACCESS" then
         return {
-            "MANUAL CONTROLS", "Current burn: " .. format("getBurnRate", value("reactor", "getBurnRate")),
-            "Plant cap: " .. format("cap", policy().burnRateCap),
-            "R: Set burn rate (mB/t)", "A: Activate reactor", "S: SCRAM reactor",
-            "D: Turbine dump mode", "L: Reactor logic mode", "",
-            "Controls: " .. (trusted() and "PAIRED" or "NOT PAIRED"),
-            "ACTIVATE: " .. (can("activate") and "READY" or "LOCKED"),
-            "SET BURN: " .. (can("setBurnRate") and "READY" or "LOCKED"),
-            "TURBINE: " .. (can("setDumpingMode") and "READY" or "LOCKED"),
-            "LOGIC: " .. (can("setLogicMode") and "READY" or "LOCKED"),
-            "SCRAM: " .. (can("scram") and "READY" or "OFFLINE"),
-            "", "Commands require text confirmation.",
-            "No automatic control enabled.",
+            "POCKET #6 / ACCESS",
+            "Direct plant control: DISABLED",
+            "Reactor controls: BASE #4 only",
+            "Pocket is read-only telemetry",
+            "and admin panel authorization.",
+            "",
+            "To unlock BASE touch panel:",
+            "Q: return to CraftOS",
+            "Run dc_remote.lua",
+            "pdc> auth",
+            "pdc> panel 4",
+            "pdc> unlock 4",
+            "pdc> lock 4",
+            "",
+            "Plant policy remains separate:",
+            "BURN CAP: " .. format("cap",policy().burnRateCap),
+            "SCRAM: " .. format("scram",policy().scram),
+            "ACTIVATE: " .. format("activate",policy().activate),
+            "LOGIC: " .. format("logic",policy().logicMode),
+            "TURBINE: " .. format("turbine",policy().turbineMode),
         }
     end
     local output = {}
@@ -174,7 +156,7 @@ local function draw()
     write(1, "TY MEK | POCKET #" .. CFG.plant_id, colors.cyan)
     write(2, "LINK: " .. (live() and "LIVE" or "OFFLINE") .. "  " .. PAGES[currentPage], live() and colors.lime or colors.red)
     write(3, "1:SUM 2:REAC 3:TURB", colors.yellow)
-    write(4, "4:ERR 5:API 6:CTRL", colors.yellow)
+    write(4, "4:ERR 5:API 6:ACCESS", colors.yellow)
     local function selectTab(index)
         currentPage = index
         scroll = 0
@@ -205,81 +187,10 @@ local function draw()
         local row = scroll + y - 4
         local line = expanded[row]
         if line then write(y,line,colors.white) end
-        if currentPage == 6 and line then
-            local key = ({
-                ["R: Set burn rate (mB/t)"]=keys.r,
-                ["A: Activate reactor"]=keys.a,
-                ["S: SCRAM reactor"]=keys.s,
-                ["D: Turbine dump mode"]=keys.d,
-                ["L: Reactor logic mode"]=keys.l,
-            })[line]
-            if key then
-                touchZones[#touchZones+1] = {y=y,x1=1,x2=width,key=key}
-            end
-        end
     end
     write(height-2, "P:UP  N:DOWN  Q:EXIT", colors.lightGray)
-    if pending then
-        write(height-1, "WAIT: " .. pending.action, colors.orange)
-    else
-        write(height-1, (notice or ""):sub(1,width), colors.cyan)
-    end
-    write(height, tostring(scroll+1) .. "/" .. tostring(maxScroll+1) .. " | 6=Control", colors.gray)
-end
-
-local function ask(title, choices)
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-    term.clear()
-    term.setCursorPos(1,1)
-    print(title)
-    if choices then for i, choice in ipairs(choices) do print(i .. ") " .. choice) end end
-    term.write("> ")
-    return read()
-end
-local function command(action, parameter)
-    if not can(action) then notice = "LOCKED / OFFLINE"; return end
-    if pending then notice = "Wait for previous ACK"; return end
-    local expected = action == "scram" and "SCRAM" or "YES"
-    local answer = ask("Confirm " .. action .. "? Type " .. expected)
-    if answer ~= expected then notice = "Cancelled"; return end
-    if not live() then notice = "Connection stale - cancelled"; return end
-    local id = math.floor(os.epoch("utc") * 10) + math.random(1,9)
-    local transmitted = rednet.send(CFG.plant_id, {
-        requestId=id, issuedUtcMs=os.epoch("utc"), action=action, value=parameter
-    }, COMMAND)
-    if transmitted then
-        pending = { id=id, action=action, at=os.clock() }
-        notice = "Command sent; waiting ACK"
-    else notice = "Send failed - check modem" end
-end
-local function controlKey(code)
-    if code == keys.r then
-        if not can("setBurnRate") then notice="BURN LOCKED"; return end
-        local raw = ask("Enter rate in mB/t")
-        local proposed = tonumber(raw)
-        local cap = policy().burnRateCap
-        local max = value("reactor","getMaxBurnRate")
-        if not proposed or proposed ~= proposed or proposed <= 0
-            or proposed == math.huge or proposed == -math.huge
-            or type(cap) ~= "number" or proposed > cap
-            or type(max) ~= "number" or proposed > max then
-            notice = "Invalid / above plant cap"; return
-        end
-        command("setBurnRate", proposed)
-    elseif code == keys.a then command("activate")
-    elseif code == keys.s then command("scram")
-    elseif code == keys.d then
-        if not can("setDumpingMode") then notice="TURBINE LOCKED"; return end
-        local index = tonumber(ask("Turbine dump mode",DUMP_MODES))
-        if index and DUMP_MODES[index] then command("setDumpingMode",DUMP_MODES[index])
-        else notice="Cancelled" end
-    elseif code == keys.l then
-        if not can("setLogicMode") then notice="LOGIC LOCKED"; return end
-        local index = tonumber(ask("Reactor logic mode",LOGIC_MODES))
-        if index and LOGIC_MODES[index] then command("setLogicMode",LOGIC_MODES[index])
-        else notice="Cancelled" end
-    end
+    write(height-1, "VIEW-ONLY / ADMIN: dc_remote", colors.cyan)
+    write(height, tostring(scroll+1) .. "/" .. tostring(maxScroll+1) .. " | 6=Access", colors.gray)
 end
 
 print("TY Pocket Client #" .. os.getComputerID())
@@ -294,11 +205,6 @@ while true do
             latest = b
             receivedAt = os.clock()
             draw()
-        elseif c == REPLY and type(b) == "table" and pending
-            and b.requestId == pending.id then
-            notice = (b.success and "OK: " or "ERROR: ") .. tostring(b.message)
-            pending = nil
-            draw()
         end
     elseif event == "key" then
         if a == keys.q then break end
@@ -306,14 +212,12 @@ while true do
             currentPage = a - keys.one + 1
             scroll = 0
         elseif a == keys.n or a == keys.pageDown then scroll = scroll + 7
-        elseif a == keys.p or a == keys.pageUp then scroll = scroll - 7
-        elseif currentPage == 6 then controlKey(a) end
+        elseif a == keys.p or a == keys.pageUp then scroll = scroll - 7 end
         draw()
     elseif event == "mouse_click" then
         for _, zone in ipairs(touchZones) do
             if c == zone.y and b >= zone.x1 and b <= zone.x2 then
                 if zone.fn then zone.fn() end
-                if zone.key then controlKey(zone.key) end
                 break
             end
         end
@@ -322,10 +226,6 @@ while true do
         scroll = scroll + a * 3
         draw()
     elseif event == "timer" and a == tick then
-        if pending and os.clock() - pending.at > 6 then
-            notice = "NO ACK - state UNKNOWN"
-            pending = nil
-        end
         tick = os.startTimer(1)
         draw()
     end
