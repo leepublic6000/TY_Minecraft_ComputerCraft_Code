@@ -5,8 +5,9 @@
 
 local CFG = {
     sample_seconds = 1,
-    trusted_base_id = 4,          -- Verified base computer ID
-    trusted_pocket_id = 6,        -- Verified Advanced Pocket Computer ID
+    trusted_base_id = 4,          -- ONLY authorized reactor-command sender
+    -- Pocket #6 remains telemetry-only. Its verified administrator controls
+    -- the base #4 PANEL LEASE through the data centre #0, never reactor APIs.
     max_allowed_burn_rate = nil,  -- REQUIRED for setBurnRate: your VERIFIED safe limit (mB/t)
     allow_remote_scram = false, -- Explicitly enable only after verifying safety controls
     allow_remote_activate = false,
@@ -141,8 +142,8 @@ local function status()
         plantId=os.getComputerID(),
         devices={reactor=capture(findReactor()), turbine=capture(findTurbine())},
         controlPolicy={
-            paired=type(CFG.trusted_base_id) == "number" or type(CFG.trusted_pocket_id) == "number",
-            controllerIds={ CFG.trusted_base_id, CFG.trusted_pocket_id },
+            paired=type(CFG.trusted_base_id) == "number",
+            controllerIds={ CFG.trusted_base_id },
             burnRateCap=CFG.max_allowed_burn_rate,
             scram=CFG.allow_remote_scram,
             activate=CFG.allow_remote_activate,
@@ -235,7 +236,9 @@ local recentRequests = {}
 local requestOrder = {}
 local function processCommand(sender, message)
     -- Rednet sender IDs can be spoofed; use only in a trusted game/network.
-    if sender ~= CFG.trusted_base_id and sender ~= CFG.trusted_pocket_id then return end
+    -- Do not accept direct Pocket #6 reactor commands, even if an older
+    -- Pocket UI still exposes controls. Base #4 is the only allowed sender.
+    if sender ~= CFG.trusted_base_id then return end
     if type(message) ~= "table" or type(message.requestId) ~= "number"
         or type(message.issuedUtcMs) ~= "number" then return end
     local delta = os.epoch("utc") - message.issuedUtcMs
@@ -260,7 +263,8 @@ end
 
 openModems()
 print("TY Mekanism plant computer #" .. os.getComputerID())
-print("Authorized controller IDs: " .. tostring(CFG.trusted_base_id) .. ", " .. tostring(CFG.trusted_pocket_id))
+print("Authorized reactor control sender: BASE #" .. tostring(CFG.trusted_base_id))
+print("Pocket #6 is telemetry/admin-only; base panel must be unlocked separately.")
 print("Sensors: " .. tostring(findReactor()) .. " / " .. tostring(findTurbine()))
 print("Use independent Mekanism/redstone reactor safety protection.")
 local timer = os.startTimer(0)
