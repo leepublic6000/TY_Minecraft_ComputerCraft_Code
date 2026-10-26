@@ -86,7 +86,7 @@ end
 local function user(uuid)
     return state.players[uuid]
 end
-local function validateSession(sender, token, action)
+local function validateSession(sender, token, action, refreshIdle)
     if type(token)~="string" or #token>100 then return nil,"Login required" end
     local sess=sessions[token]
     if not sess then return nil,"Session expired or invalid" end
@@ -103,7 +103,8 @@ local function validateSession(sender, token, action)
     if action and info.role~="admin" and action~="nodes" and action~="info" and action~="status" then
         return nil,"Permission denied"
     end
-    sess.last=clock()
+    -- Passive Pocket dashboard presence MUST NOT extend a session's idle TTL.
+    if refreshIdle~=false then sess.last=clock() end
     return sess
 end
 local function newSession(uuid,device)
@@ -130,6 +131,12 @@ function M.enabled() return state and state.enabled==true end
 function M.authorize(sender, token, action)
     if not M.enabled() then return true,nil end
     return validateSession(sender,token,action)
+end
+function M.activeSession(sender,token)
+    -- Display-only proof of a still-valid authenticated client. Unlike
+    -- authorize(), this does not refresh the 30-minute inactivity timeout.
+    if not M.enabled() then return false end
+    return validateSession(sender,token,"status",false)~=nil
 end
 function M.authorizedUser(sender,token,action)
     if not M.enabled() then return nil end
