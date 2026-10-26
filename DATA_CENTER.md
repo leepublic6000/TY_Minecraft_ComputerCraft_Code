@@ -13,6 +13,29 @@
 
 由於你已使用 Ender Modem，反應爐資料可以直接由 #3 發往 #4 與 Pocket #6，**資料中心不是必須經過的網路中繼站**；它負責管理層（控制台／節點代理）。這可以避免資料中心故障時連唯讀監控都一同中斷。
 
+## 資料中心 #0 上方 Advanced Monitor 狀態看板（2026-10-26）
+
+已直接擴充原有 `dc_center.lua`：資料中心 #0 的 Advanced Monitor 將顯示已知電腦 #0、#3、#4、#6 狀態，**不必安裝或另開顯示程式**，管理主控台原有 `dc>`、玩家登入、平板解鎖等功能保留。
+
+| 顯示項目 | 資料來源與精確意義 |
+| --- | --- |
+| `#0 CENTRE ONLINE` | 資料中心目前的程式正在執行（螢幕本身無法在 #0 斷電時持續更新） |
+| `#3 NUCLEAR` | 每約 3 秒收到的 `dc_agent.lua` 心跳；距離上次心跳超過 12 秒顯示 `OFFLINE`，同時標示最後回報的 `APP RUNNING/STOPPED/ERROR` |
+| `#3 TELEMETRY LIVE/STALE/NO DATA` | **另外追蹤** `mek_send.lua` 的 `ty_mek_control_v1:data` 廣播；超過 5 秒沒有新資料顯示 `STALE`。管理代理 `RUNNING` 不等於監控資料有送達 |
+| `#4 BASE` | #4 管理代理的心跳連線及 `mek_watch.lua` 服務狀態 |
+| `#6 POCKET PDC LIVE/STALE/NO PDC` | 已登入的 #6 `dc_remote.lua` 透過驗證後心跳回報；超過 12 秒未收到會顯示 `PDC STALE`。**只表示平板管理程式是否活躍，不能證明平板硬體開關狀態** |
+
+### 在遊戲中套用
+
+1. 把上方 **Advanced Monitor 接到資料中心 Computer #0**；若緊貼電腦上方，可由 `top` 周邊直接存取；不相鄰時需以 Wired Modem/網路線連接。程式優先選擇 `top`，否則選取面積最大的已連線顯示器。
+2. 在 #0 的 **CraftOS `>` 分頁**執行 `ty.lua update dc_center.lua`，只更新資料中心的磁碟檔案。從原本的 `dc>` 主控台輸入 `exit` 後，回到 Shell 執行 `bg dc_center.lua` 讓新版生效，**不要保留兩份中心程式**。這會短暫中斷資料中心管理通訊，但不會直接重啟核電廠 #3 或基地 #4。
+3. 更新並重新啟動 Pocket #6 的 `dc_remote.lua`（`ty.lua update dc_remote.lua`）；完成管理員登入後，平板管理程式會每約 3 秒傳送活動心跳。當 Pocket 改用 `mek_pocket.lua`、Lua 或關閉 `dc_remote.lua`，看板上的 `PDC` 心跳會到期，即使平板本身仍在使用。
+4. 在 #0 的 `dc>` 可用 `monitor` 查詢目前偵測到的顯示器名稱與字元尺寸；若看板仍是黑色，先確認連接、`monitor` 指令結果及 #0 是否確實重新載入了新版。顯示器可依可用字元自動調整文字大小；斷線時會定期嘗試重新偵測。
+
+看板只是唯讀狀態顯示，不會啟停反應爐或解除控制面板權限。Rednet 心跳只能判定「指定時間內是否收到訊息」，不是設備硬體健康、反應爐狀態或強式身分認證的證明。
+
+**版本界線**：GitHub 修改及靜態程式檢查不等於已在你的 ATM10 8.3 遊戲畫面驗證；使用者仍需按上述步驟在 #0/#6 載入新版才會顯示資訊。不需要修改 #3 的 `mek_send.lua` 或 #4 的 `mek_watch.lua`。
+
 ## 1. 資料中心：先安裝主控台
 
 在資料中心的 Advanced Computer，返回 CraftOS `>` 命令列。確認已接上 **Wireless 或 Ender Modem**，輸入：
@@ -40,7 +63,7 @@ bg dc_agent.lua
 
 **注意**：要讓資料中心管理 `mek_send.lua` / `mek_watch.lua`，請停止原先自行在其他分頁啟動的同名程式，再交給 `dc_agent.lua` 管理，避免同一電腦執行兩份監控程式。
 
-Pocket #6 不必先安裝代理，原本的 `mek_pocket.lua` 仍能直接監控核電廠；若要在資料中心查看 Pocket 在線狀態，可以選擇安裝代理，但需讓它在 Pocket 開機／區塊載入期間持續運作。
+Pocket #6 不必先安裝代理，`mek_pocket.lua` 仍能直接唯讀監控核電廠。新版資料中心看板會利用已驗證的 `dc_remote.lua` 活動心跳顯示 `PDC LIVE`，無須額外安裝代理；但如果該管理程式沒執行，不能把 `NO PDC` 當成 Pocket 整台電腦離線。
 
 ## 3. 資料中心指令
 
@@ -57,6 +80,7 @@ restart 3
 status 4
 update 4
 start 4
+monitor
 ```
 
 `nodes`：列出已知電腦，`ONLINE` 表示最近 12 秒內收到代理心跳，**不是 Minecraft 電腦硬體一定關機／開機的證明**。
