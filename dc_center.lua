@@ -542,8 +542,9 @@ local function receiveLoop()
         elseif id and proto==AUTH_REQ then auth.handle(id,msg)
         elseif id==6 and proto==POCKET_PRESENCE and type(msg)=="table"
             and msg.version==1 and msg.kind=="pdc_alive" and auth.enabled() then
-            local granted=auth.authorize(id,msg.auth,"status")
-            if granted then pocketSeen=os.clock() end
+            if auth.activeSession(id,msg.auth) then
+                pocketSeen=os.clock()
+            end
         elseif id==3 and proto==MEK_DATA and type(msg)=="table"
             and msg.version==1 and msg.plantId==3
             and type(msg.devices)=="table" then
