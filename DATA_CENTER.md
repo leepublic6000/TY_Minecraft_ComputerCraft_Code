@@ -23,7 +23,7 @@
 | `#3 NUCLEAR` | 每約 3 秒收到的 `dc_agent.lua` 心跳；距離上次心跳超過 12 秒顯示 `OFFLINE`，同時標示最後回報的 `APP RUNNING/STOPPED/ERROR` |
 | `#3 TELEMETRY LIVE/STALE/NO DATA` | **另外追蹤** `mek_send.lua` 的 `ty_mek_control_v1:data` 廣播；超過 5 秒沒有新資料顯示 `STALE`。管理代理 `RUNNING` 不等於監控資料有送達 |
 | `#4 BASE` | #4 管理代理的心跳連線及 `mek_watch.lua` 服務狀態 |
-| `#6 POCKET PDC LIVE/STALE/NO PDC` | 已登入的 #6 `dc_remote.lua` 透過驗證後心跳回報；超過 12 秒未收到會顯示 `PDC STALE`。**只表示平板管理程式是否活躍，不能證明平板硬體開關狀態** |
+| `#6 POCKET PDC LIVE/AGENT LIVE/STALE/NO SIGNAL` | 優先使用已登入的 #6 `dc_remote.lua` 活動心跳，若另有配對中的 `dc_agent.lua` 可改用其心跳；超過 12 秒沒有新訊號顯示 `STALE`／`NO SIGNAL`。**這是軟體心跳，不等同於平板硬體開關狀態** |
 
 ### 在遊戲中套用
 
