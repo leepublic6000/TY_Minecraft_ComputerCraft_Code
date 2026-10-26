@@ -96,7 +96,10 @@ local function linkStatus(id)
         suffix=("ERROR "..tostring(n.lastError)):sub(1,70)
     end
     local c=active and (paired and colors.lime or colors.orange) or colors.red
-    return link,suffix,c
+    local appColor=not active and colors.gray or
+        (n.state=="RUNNING" and colors.lime or
+            (n.state=="ERROR" and colors.red or colors.orange))
+    return link,suffix,c,appColor
 end
 local function makeDisplayRows(w,h)
     local rows={}
@@ -105,8 +108,8 @@ local function makeDisplayRows(w,h)
             fg=fg or colors.white,bg=bg or colors.black,
             rightFg=rightFg or fg or colors.white}
     end
-    local pLink,pDetail,pColor=linkStatus(3)
-    local bLink,bDetail,bColor=linkStatus(4)
+    local pLink,pDetail,pColor,pAppColor=linkStatus(3)
+    local bLink,bDetail,bColor,bAppColor=linkStatus(4)
     local onlineCount=(pLink=="ONLINE" and 1 or 0)+(bLink=="ONLINE" and 1 or 0)
     local feedAge=age(plantDataSeen)
     local feed=not feedAge and "NO DATA" or
@@ -127,11 +130,11 @@ local function makeDisplayRows(w,h)
         row("  SERVER ACTIVE",nil,colors.lightGray)
         if h>=18 then row("") end
         row("#3  NUCLEAR",pLink,colors.white,nil,pColor)
-        row("  "..pDetail,nil,pColor)
+        row("  "..pDetail,nil,pAppColor)
         row("  TELEMETRY "..feed,feedAge and (feedAge.."s") or "--",feedColor,nil,feedColor)
         if h>=18 then row("") end
         row("#4  BASE",bLink,colors.white,nil,bColor)
-        row("  "..bDetail,nil,bColor)
+        row("  "..bDetail,nil,bAppColor)
         if h>=18 then row("") end
         row("#6  POCKET",pocket,colors.white,nil,pocketColor)
         row("  "..(seenPocket and "PDC LAST "..seenPocket.."s" or
@@ -140,9 +143,9 @@ local function makeDisplayRows(w,h)
     else
         row("#0 CENTRE","ONLINE",colors.white,nil,colors.lime)
         row("#3 PLANT",pLink,colors.white,nil,pColor)
-        row(" "..pDetail,nil,pColor)
+        row(" "..pDetail,nil,pAppColor)
         row("#4 BASE",bLink,colors.white,nil,bColor)
-        row(" "..bDetail,nil,bColor)
+        row(" "..bDetail,nil,bAppColor)
         row("#6 POCKET",pocket,colors.white,nil,pocketColor)
         row("PLANT TELEMETRY",feed,colors.white,nil,feedColor)
     end
@@ -229,9 +232,11 @@ local function updateDisplay()
         if w~=displayWidth or h~=displayHeight then
             fitDisplay(display)
             w,h=display.getSize()
+            display.setBackgroundColor(colors.black)
+            display.clear()
         end
-        display.setBackgroundColor(colors.black)
-        display.clear()
+        -- Repaint each occupied row, without blanking the whole screen each
+        -- second. Full clear is only needed when the monitor size changes.
         for y,r in ipairs(makeDisplayRows(w,h)) do
             writeDisplayRow(display,w,h,y,r)
         end
