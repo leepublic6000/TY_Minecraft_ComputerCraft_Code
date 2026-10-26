@@ -142,7 +142,7 @@ pdc> lock 4      -- 輸入大寫 LOCK；立即撤銷
 
 完整部署方式與安全限制請見 [DATA_CENTER.md](DATA_CENTER.md)。
 
-**資料中心上方 Advanced Monitor**：最新 `dc_center.lua` 會自動偵測已連接的顯示器（優先 `top`），顯示 #0/#3/#4 的心跳、服務狀態，以及 #3 獨立的監控遙測 `LIVE/STALE`；新版 `dc_remote.lua` 在已登入時會送出 Pocket #6 管理介面的活動心跳。即使管理代理回報 `RUNNING`，若監控資料未送達仍會顯示 `DATA STALE`。資料中心 `dc>` 新增唯讀 `monitor` 查詢。完整安裝說明與狀態定義見 [資料中心顯示器章節](DATA_CENTER.md#資料中心-0-上方-advanced-monitor-狀態看板2026-10-26)。
+**資料中心上方 Advanced Monitor**：最新 `dc_center.lua`（搭配 `dc_auth.lua`）會自動偵測已連接的顯示器（優先 `top`），顯示 #0/#3/#4 的心跳、服務狀態，以及 #3 獨立的監控遙測 `LIVE/STALE`；新版 `dc_remote.lua` 在已登入時會送出 Pocket #6 管理介面的活動心跳。即使管理代理回報 `RUNNING`，若監控資料未送達仍會顯示 `DATA STALE`。資料中心 `dc>` 新增唯讀 `monitor` 查詢。完整安裝說明與狀態定義見 [資料中心顯示器章節](DATA_CENTER.md#資料中心-0-上方-advanced-monitor-狀態看板2026-10-26)。
 
 Pocket #6 也可以使用 [`dc_remote.lua`](dc_remote.lua) 連回資料中心 #0，直接執行 `nodes`、`info 3`、`update 3`、`start 3` 等管理命令。資料中心僅需一次更新 `dc_center.lua`，既有 #3、#4 代理不需重裝；詳見 [DATA_CENTER.md](DATA_CENTER.md)。
 
