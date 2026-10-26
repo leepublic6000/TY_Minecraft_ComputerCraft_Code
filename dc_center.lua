@@ -542,7 +542,9 @@ local function receiveLoop()
         elseif id and proto==AUTH_REQ then auth.handle(id,msg)
         elseif id==6 and proto==POCKET_PRESENCE and type(msg)=="table"
             and msg.version==1 and msg.kind=="pdc_alive" and auth.enabled() then
-            if auth.activeSession(id,msg.auth) then
+            -- Compatible with an older dc_auth.lua during a staged update.
+            if type(auth.activeSession)=="function"
+                and auth.activeSession(id,msg.auth) then
                 pocketSeen=os.clock()
             end
         elseif id==3 and proto==MEK_DATA and type(msg)=="table"
