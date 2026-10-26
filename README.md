@@ -32,7 +32,7 @@ ATM10 8.3（Minecraft / Mekanism / CC:Tweaked）核分裂反應爐與工業渦�
 | --- | --- | --- |
 | `mek_send.lua` | 核電廠 #3 | 動態擷取反應爐／渦輪所有公開、免參數、唯讀 `get*`／`is*`／`has*`／`can*` 方法；每秒廣播資料；對允許的手動指令檢查參數與權限並讀回結果 |
 | `mek_watch.lua` | 基地 #4 | 左側 71×33 唯讀完整資料分頁；右側 29×33 觸控控制；輸出最新完整快照 `mek_latest.json` |
-| `mek_pocket.lua` | Pocket #6 | 隨身完整資料分頁、狀態總覽及手動控制（鍵盤與部分螢幕觸控） |
+| `mek_pocket.lua` | Pocket #6 | 唯讀監控反應爐／渦輪所有資料；第六頁 `ACCESS` 提示使用 `dc_remote.lua` 在平板授權基地 #4 |
 
 **資料範圍**：只包含 `Fission Reactor Logic Adapter` / `Industrial Turbine Valve` 透過 CC:Tweaked **實際公開**的免參數查詢方法；查詢失敗保留在 `errors`，所有方法名稱（含不能直接呼叫的 setter）保留在 `methods`。不會假裝取得其他設備（例如鍋爐、儲能矩陣）的數據。溫度 `getTemperature` 從 Kelvin 轉成攝氏（畫面使用 `C` 字元）；熱容量／溫差類數值不做錯誤換算。
 
@@ -80,8 +80,7 @@ wget https://raw.githubusercontent.com/leepublic6000/TY_Minecraft_ComputerCraft_
 核電廠端程式開頭 `CFG` 已設定合法電腦 ID，但下面的功能預設**全部禁用**：
 
 ```lua
-trusted_base_id = 4,
-trusted_pocket_id = 6,
+trusted_base_id = 4, -- 唯一反應爐控制指令來源：基地 #4
 max_allowed_burn_rate = nil,
 allow_remote_scram = false,
 allow_remote_activate = false,
@@ -91,13 +90,13 @@ allow_remote_turbine_mode = false,
 
 要開放哪一種手動操作，必須由你在核電廠 #3 的 `mek_send.lua` 中**逐項明確開啟**，並重啟該程式：
 
-- `allow_remote_scram = true`：允許 #4、#6 發出 SCRAM 停機指令；基地紅色按鈕點一次，Pocket 必須鍵入 `SCRAM` 確認。
+- `allow_remote_scram = true`：只允許基地 #4 發出 SCRAM 停機指令；基地紅色按鈕點一次，Pocket #6 不再直接操作反應爐。
 - `max_allowed_burn_rate = <已實測安全上限>`：才允許 `setBurnRate(rate)`，且程式會再與 `getMaxBurnRate()` 的結構上限比較。**不可以把結構最高燃燒速率當成安全設定值**。
 - `allow_remote_activate = true`：允許人工遠端啟動；使用前必須確認冷卻／水回收及獨立安全停機機制正常。
 - `allow_remote_turbine_mode = true`：允許切換 `IDLE`／`DUMPING_EXCESS`／`DUMPING`；排出的蒸氣無法回收到閉環水冷系統。
 - `allow_remote_logic_mode = true`：允許切換 Logic Adapter 的 `DISABLED`、`TEMPERATURE`、`CRITICAL_WASTE_LEVEL`、`DAMAGED`、`DEPLETED`、`ACTIVATION`。變更安全邏輯可能停用原有聯鎖，**不建議在未了解當前紅石保護時開啟**。
 
-**兩點保護**：基地會在重要操作前要求重複點按確認（SCRAM 例外），Pocket 會要求輸入 `YES` 或 `SCRAM`；核電廠端仍會獨立檢查合法指令、來源電腦 ID、安全上限、設備結構與實際讀回。收到 `NO ACK`／逾時**不代表設備沒動作**，務必重新查詢狀態。
+**兩道限制**：基地先檢查 Pocket #6 管理員核准的五分鐘面板授權，重要操作再要求兩次點按（SCRAM 例外）；核電廠端只接受來源 #4，仍獨立檢查合法指令、安全上限、設備結構與結果讀回。收到 `NO ACK`／逾時**不代表設備沒動作**，務必重新查詢狀態。
 
 ## 操作介面
 
@@ -117,11 +116,11 @@ pdc> lock 4      -- 輸入大寫 LOCK；立即撤銷
 
 基地右螢幕顯示 `P:LOCK`（未授權）或 `P:ON`（已授權）。新開機、基地監控程式重啟、五分鐘授權到期、資料中心心跳中斷逾 12 秒或資料中心重新啟動後，面板會**自動重新上鎖**，取消尚未完成的二次點擊確認。已經送往反應爐的指令不會因事後上鎖而撤銷。程式不持久化解鎖狀態。
 
-**面板解鎖是額外一層鎖，不是取代核電廠 #3 的安全設定。** `mek_send.lua` 中 `allow_remote_*` 預設仍關閉、`max_allowed_burn_rate` 預設 `nil`；即使面板已授權，未經核電廠安全維護設定的按鈕仍呈灰色。這個介面層上鎖也**不阻止**其他程式直接對 #3 發送 Rednet 訊息（既有 `mek_pocket.lua` 直接控制功能並未移除），因此不可將它誤認為整個反應爐的強式身分授權或安全聯鎖。基地面板上鎖時連遠端 SCRAM 按鈕也會禁用，**必須保有獨立的實體/紅石安全停機方式**。詳見 [DATA_CENTER.md](DATA_CENTER.md#基地控制面板的-pocket-授權解鎖)。
+**面板解鎖是額外一層鎖，不是取代核電廠 #3 的安全設定。** `mek_send.lua` 中 `allow_remote_*` 預設仍關閉、`max_allowed_burn_rate` 預設 `nil`；即使面板已授權，未經核電廠安全維護設定的按鈕仍呈灰色。GitHub 新版 `mek_send.lua` 僅接受 #4 控制指令，`mek_pocket.lua` 已改為唯讀；但**#3 本機未重新載入新版前，舊版權限規則仍在執行**。Rednet 電腦 ID 也不是密碼學防偽授權。基地面板上鎖時連遠端 SCRAM 按鈕也會禁用，**必須保有獨立的實體/紅石安全停機方式**。詳見 [DATA_CENTER.md](DATA_CENTER.md#基地控制面板的-pocket-授權解鎖)。
 
 **更新基地畫面（#4 本機）**：使用支援選擇更新的新版 `ty.lua update mek_watch.lua`，只替換基地磁碟上的 `mek_watch.lua` 並保留備份；程式不會自動重啟，需在確認由 `dc_agent.lua` 管理時才從資料中心／Pocket `restart 4`，或手動關閉舊的 `mek_watch` 分頁再啟動新版本。**不要在 #3 更新 `mek_send.lua` 或重啟反應爐**。舊版 `ty.lua` 若不支援單檔參數，先依 [新版管理器升級步驟](INSTALLER.md#舊版-tylua-升級到選擇更新) 取得新版，避免舊版忽略檔名而更新所有程式。
 
-**Pocket**：上方點選 `1～6` 分頁，或按數字鍵；`P/N` 往上／往下、`Q` 結束。進入 `6:CTRL` 後，按 **R** 設定燃燒速率、**A** 啟動、**S** SCRAM、**D** 渦輪模式、**L** 反應爐 Logic Mode；可點擊畫面上相應的操作文字。需要輸入設定值及文字確認時，使用 CraftOS 鍵盤輸入。任何控制都必須先由核電廠端開放對應權限。
+**Pocket**：`mek_pocket.lua` 前五頁維持完整唯讀資料顯示，第六頁為 `ACCESS` 說明；Pocket #6 在 `dc_remote.lua` 經管理員驗證後使用 `panel 4`、`unlock 4`、`lock 4`。反應爐實際操作只在基地 #4 的觸控控制台執行，並受 #3 安全設定限制。
 
 ## 重要限制
 
