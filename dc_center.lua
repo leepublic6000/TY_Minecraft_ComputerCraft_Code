@@ -116,10 +116,18 @@ local function makeDisplayRows(w,h)
         (feedAge<5 and "LIVE" or "STALE")
     local feedColor=feed=="LIVE" and colors.lime or colors.orange
     local seenPocket=age(pocketSeen)
-    local pocket=not auth.enabled() and "AUTH OFF" or
-        (seenPocket and seenPocket<12 and "PDC LIVE" or
-            (seenPocket and "PDC STALE" or "NO PDC"))
-    local pocketColor=pocket=="PDC LIVE" and colors.lime or colors.orange
+    local pocketAgent=nodes[6]
+    local pocketAgentAge=pocketAgent and age(pocketAgent.seen)
+    local pocketAgentLive=pocketAgentAge and pocketAgentAge<12
+        and pocketAgent.pairedCenter==os.getComputerID()
+    -- Prefer an authenticated Pocket management-app pulse; optionally use
+    -- an installed dc_agent heartbeat if the Pocket runs one separately.
+    local pocket=seenPocket and seenPocket<12 and "PDC LIVE" or
+        (pocketAgentLive and "AGENT LIVE" or
+            (seenPocket and "PDC STALE" or
+                (pocketAgentAge and "AGENT STALE" or "NO SIGNAL")))
+    local pocketColor=(pocket=="PDC LIVE" or pocket=="AGENT LIVE")
+        and colors.lime or colors.orange
     local line=string.rep("-",math.max(1,w))
     row("TY  /  DATA CENTRE  #0",nil,colors.white,colors.blue)
     row("AGENTS "..onlineCount.."/2",auth.enabled() and "AUTH ON" or "AUTH OFF",
@@ -137,8 +145,11 @@ local function makeDisplayRows(w,h)
         row("  "..bDetail,nil,bAppColor)
         if h>=18 then row("") end
         row("#6  POCKET",pocket,colors.white,nil,pocketColor)
-        row("  "..(seenPocket and "PDC LAST "..seenPocket.."s" or
-            "PDC APP NOT SEEN"),nil,colors.lightGray)
+        row("  "..(pocket=="AGENT LIVE" and
+            ("AGENT LAST "..pocketAgentAge.."s") or
+            (seenPocket and "PDC LAST "..seenPocket.."s" or
+                (pocketAgentAge and "AGENT LAST "..pocketAgentAge.."s" or
+                    "NO PDC/AGENT SIGNAL"))),nil,colors.lightGray)
         if h>=18 then row("") end
     else
         row("#0 CENTRE","ONLINE",colors.white,nil,colors.lime)
