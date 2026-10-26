@@ -27,6 +27,13 @@ local pendingId, pendingTarget, pendingReply = nil, nil, nil
 local nonce = 0
 local remotePending = nil -- ONE remote node command at a time; local console remains available
 local consoleBusy = false -- Serialise confirmations and commands from local + Pocket
+-- Optional local Advanced Monitor: read-only node dashboard.
+-- Agent heartbeat, plant telemetry and Pocket app presence are separate.
+local MEK_DATA = "ty_mek_control_v1:data"
+local POCKET_PRESENCE = "ty.dc.v1:pocket_presence"
+local plantDataSeen, pocketSeen = nil, nil
+local display, displayName, displayWidth, displayHeight = nil,nil,nil,nil
+local displayLastDraw, displayProbeAt, displayError = -math.huge,-math.huge,nil
 
 local function openWireless()
     local found = false
@@ -70,6 +77,182 @@ local function showInfo(id)
     print("Last seen: " .. math.floor(os.clock() - n.seen) .. " seconds ago")
     if n.lastError then print("Last error: " .. tostring(n.lastError)) end
 end
+-- Read-only monitor output: uses the existing agent node table and
+-- records only the arrival time of unrelated telemetry/presence messages.
+local function age(t)
+    if not t then return nil end
+    return math.max(0,math.floor(os.clock()-t))
+end
+local function linkStatus(id)
+    local n=nodes[id]
+    if not n then return "WAIT","NO AGENT DATA",colors.orange end
+    local last=age(n.seen)
+    local active=last<12
+    local paired=n.pairedCenter==os.getComputerID()
+    local link=active and (paired and "ONLINE" or "UNPAIRED") or "OFFLINE"
+    local suffix=(active and "APP " or "LAST ")..
+        tostring(n.state or "--"):sub(1,9).."  "..last.."s"
+    if n.state=="ERROR" and n.lastError then
+        suffix=("ERROR "..tostring(n.lastError)):sub(1,70)
+    end
+    local c=active and (paired and colors.lime or colors.orange) or colors.red
+    return link,suffix,c
+end
+local function makeDisplayRows(w,h)
+    local rows={}
+    local function row(label,right,fg,bg,rightFg)
+        rows[#rows+1]={text=tostring(label or ""),right=right,
+            fg=fg or colors.white,bg=bg or colors.black,
+            rightFg=rightFg or fg or colors.white}
+    end
+    local pLink,pDetail,pColor=linkStatus(3)
+    local bLink,bDetail,bColor=linkStatus(4)
+    local onlineCount=(pLink=="ONLINE" and 1 or 0)+(bLink=="ONLINE" and 1 or 0)
+    local feedAge=age(plantDataSeen)
+    local feed=not feedAge and "NO DATA" or
+        (feedAge<5 and "LIVE" or "STALE")
+    local feedColor=feed=="LIVE" and colors.lime or colors.orange
+    local seenPocket=age(pocketSeen)
+    local pocket=not auth.enabled() and "AUTH OFF" or
+        (seenPocket and seenPocket<12 and "PDC LIVE" or
+            (seenPocket and "PDC STALE" or "NO PDC"))
+    local pocketColor=pocket=="PDC LIVE" and colors.lime or colors.orange
+    local line=string.rep("-",math.max(1,w))
+    row("TY  /  DATA CENTRE  #0",nil,colors.white,colors.blue)
+    row("AGENTS "..onlineCount.."/2",auth.enabled() and "AUTH ON" or "AUTH OFF",
+        colors.white,colors.gray,auth.enabled() and colors.lime or colors.orange)
+    if h>=13 then
+        row(line,nil,colors.gray)
+        row("#0  CENTRE","ONLINE",colors.white,nil,colors.lime)
+        row("  SERVER ACTIVE",nil,colors.lightGray)
+        if h>=18 then row("") end
+        row("#3  NUCLEAR",pLink,colors.white,nil,pColor)
+        row("  "..pDetail,nil,pColor)
+        row("  TELEMETRY "..feed,feedAge and (feedAge.."s") or "--",feedColor,nil,feedColor)
+        if h>=18 then row("") end
+        row("#4  BASE",bLink,colors.white,nil,bColor)
+        row("  "..bDetail,nil,bColor)
+        if h>=18 then row("") end
+        row("#6  POCKET",pocket,colors.white,nil,pocketColor)
+        row("  "..(seenPocket and "PDC LAST "..seenPocket.."s" or
+            "PDC APP NOT SEEN"),nil,colors.lightGray)
+        if h>=18 then row("") end
+    else
+        row("#0 CENTRE","ONLINE",colors.white,nil,colors.lime)
+        row("#3 PLANT",pLink,colors.white,nil,pColor)
+        row(" "..pDetail,nil,pColor)
+        row("#4 BASE",bLink,colors.white,nil,bColor)
+        row(" "..bDetail,nil,bColor)
+        row("#6 POCKET",pocket,colors.white,nil,pocketColor)
+        row("PLANT TELEMETRY",feed,colors.white,nil,feedColor)
+    end
+    row(line,nil,colors.gray)
+    row("AGENT != REACTOR DATA",nil,colors.lightGray)
+    -- Use small screens without cutting out the important telemetry line.
+    if #rows>h then
+        local short={}
+        for i=1,math.max(0,h-1) do short[i]=rows[i] end
+        short[h]=rows[#rows]
+        return short
+    end
+    return rows
+end
+local function findDisplay()
+    local candidates={}
+    for _,name in ipairs(peripheral.getNames()) do
+        if peripheral.hasType(name,"monitor") then
+            local m=peripheral.wrap(name)
+            local ok,w,h=pcall(m.getSize)
+            if ok and w and h then
+                candidates[#candidates+1]={name=name,monitor=m,area=w*h}
+            end
+        end
+    end
+    table.sort(candidates,function(a,b)
+        if a.name=="top" then return true end
+        if b.name=="top" then return false end
+        if a.area==b.area then return a.name<b.name end
+        return a.area>b.area
+    end)
+    if #candidates<1 then return false end
+    display,displayName=candidates[1].monitor,candidates[1].name
+    displayWidth,displayHeight=nil,nil
+    return true
+end
+local function fitDisplay(m)
+    -- Monitor text scales in CC:Tweaked use 0.5-step increments.
+    m.setTextScale(0.5)
+    local rawW,rawH=m.getSize()
+    local chosen=0.5
+    for step=5,1,-1 do
+        local s=step*0.5
+        if math.floor(rawW*0.5/s)>=26
+            and math.floor(rawH*0.5/s)>=13 then
+            chosen=s
+            break
+        end
+    end
+    m.setTextScale(chosen)
+    displayWidth,displayHeight=m.getSize()
+end
+local function writeDisplayRow(m,w,h,y,r)
+    if y<1 or y>h then return end
+    m.setBackgroundColor(r.bg)
+    m.setTextColor(r.fg)
+    m.setCursorPos(1,y)
+    m.write(string.rep(" ",w))
+    local right=r.right and tostring(r.right) or nil
+    local limit=right and math.max(0,w-#right-1) or w
+    m.setCursorPos(1,y)
+    m.write(r.text:sub(1,limit))
+    if right and #right<=w then
+        m.setTextColor(r.rightFg)
+        m.setCursorPos(w-#right+1,y)
+        m.write(right)
+    end
+end
+local function updateDisplay()
+    local now=os.clock()
+    if now-displayLastDraw<1 then return end
+    displayLastDraw=now
+    if not display then
+        if now<displayProbeAt then return end
+        displayProbeAt=now+5
+        local ok,found=pcall(findDisplay)
+        if not ok or not found then
+            displayError=ok and "No attached Advanced Monitor" or tostring(found)
+            return
+        end
+    end
+    local ok,err=pcall(function()
+        local w,h=display.getSize()
+        if w~=displayWidth or h~=displayHeight then
+            fitDisplay(display)
+            w,h=display.getSize()
+        end
+        display.setBackgroundColor(colors.black)
+        display.clear()
+        for y,r in ipairs(makeDisplayRows(w,h)) do
+            writeDisplayRow(display,w,h,y,r)
+        end
+    end)
+    if not ok then
+        displayError=tostring(err)
+        display,displayName,displayWidth,displayHeight=nil,nil,nil,nil
+        displayProbeAt=now+5
+    else
+        displayError=nil
+    end
+end
+local function displayStatus()
+    if display then
+        local ok,w,h=pcall(display.getSize)
+        if ok then return "Monitor "..displayName.." / "..w.."x"..h end
+    end
+    return "Monitor not found: "..tostring(displayError or
+        "attach to top or via wired modem")
+end
+
 -- The Pocket sees the SAME node state used by the local dc> console.
 -- Read-only requests are handled immediately. Mutation requests are forwarded
 -- as fixed allowlisted actions to the existing dc_agent.lua on each node.
@@ -352,6 +535,14 @@ local function receiveLoop()
         if id and proto==SHELL_CLIENT then onShellClient(id,msg)
         elseif id and proto==SHELL_HOST_REPLY then onShellHostReply(id,msg)
         elseif id and proto==AUTH_REQ then auth.handle(id,msg)
+        elseif id==6 and proto==POCKET_PRESENCE and type(msg)=="table"
+            and msg.version==1 and msg.kind=="pdc_alive" and auth.enabled() then
+            local granted=auth.authorize(id,msg.auth,"status")
+            if granted then pocketSeen=os.clock() end
+        elseif id==3 and proto==MEK_DATA and type(msg)=="table"
+            and msg.version==1 and msg.plantId==3
+            and type(msg.devices)=="table" then
+            plantDataSeen=os.clock()
         end
         if id and type(msg) == "table" and msg.version == 1 then
             if proto == HEART and msg.kind == "node" and msg.id == id
@@ -388,6 +579,8 @@ local function receiveLoop()
                 "No panel ACK; lock state UNKNOWN. Query panel 4 before retrying."
                 or "No agent ACK within 9 seconds; execution state UNKNOWN. Use info.")
         end
+        -- A bad/unplugged display must never shut down the data-centre.
+        updateDisplay()
     end
 end
 local function sendCommand(id, action)
@@ -449,6 +642,7 @@ local function help()
     print("start <id>     - Start approved program")
     print("stop <id>      - Stop approved program (plant guarded)")
     print("restart <id>   - Restart approved program (plant guarded)")
+    print("monitor        - Check local overhead monitor")
     print("help           - Show commands")
     print("exit           - Exit console")
 end
@@ -474,6 +668,7 @@ local function consoleLoop()
             else print("auth claim|enroll|confirm|enable|status");ok=true end
             if message then print((ok and "OK: " or "ERROR: ")..message) end
         elseif cmd == "nodes" then listNodes()
+        elseif cmd == "monitor" then print(displayStatus())
         elseif cmd == "info" then
             local id=tonumber(arg)
             if id then showInfo(id) else print("Usage: info <id>") end
