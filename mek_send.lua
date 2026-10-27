@@ -260,6 +260,16 @@ local function commandResult(request)
             stopPulseOK,stopPulseError=pulseRelay(CFG.relay_stop_side)
         end
         method, readback, wanted = "scram", "getStatus", false
+        -- Redstone ACTIVATION can have already stopped the reactor as soon
+        -- as the STOP latch resets. Avoid calling Mekanism scram() on an
+        -- already stopped reactor (Mekanism rejects that call).
+        if read(target,readback)==false then
+            if not stopPulseOK then
+                return false,"Reactor STOPPED but STOP relay did not confirm: "..
+                    tostring(stopPulseError)
+            end
+            return true,"Reactor STOPPED after STOP request (RUN latch feedback not available)"
+        end
     elseif action == "activate" then
         if not CFG.allow_remote_activate then return false, "Remote activation locked at plant" end
         if not CFG.relay_control_enabled then
@@ -314,7 +324,19 @@ local function commandResult(request)
     else
         ok, err = pcall(peripheral.call, target, method, wanted)
     end
-    if not ok then return false, "Peripheral call failed: " .. tostring(err) end
+    if not ok then
+        -- If the relay removed ACTIVATION between status reads, SCRAM can
+        -- legitimately report "already inactive". Confirm actual reactor
+        -- state rather than returning an inaccurate stop failure.
+        if action=="scram" and read(target,"getStatus")==false then
+            if not stopPulseOK then
+                return false,"Reactor STOPPED but hardware STOP pulse failed: "..
+                    tostring(stopPulseError)
+            end
+            return true,"Reactor STOPPED (SCRAM call raced hardware STOP)"
+        end
+        return false, "Peripheral call failed: " .. tostring(err)
+    end
 
     -- A successful call is not proof that the requested setting took effect.
     sleep(0.15)
@@ -381,14 +403,75 @@ if CFG.relay_control_enabled then
 end
 print("Sensors: " .. tostring(findReactor()) .. " / " .. tostring(findTurbine()))
 print("Use independent Mekanism/redstone reactor safety protection.")
-local timer = os.startTimer(0)
-while true do
-    local event, a, b, c = os.pullEvent()
-    if event == "timer" and a == timer then
-        local snapshot = status()
-        rednet.broadcast(snapshot, TELEMETRY)
-        timer = os.startTimer(CFG.sample_seconds)
-    elseif event == "rednet_message" and c == COMMAND then
-        processCommand(a, b)
+-- CC:Tweaked sleep() discards other events in the SAME coroutine.
+-- A START pulse used to consume the scheduled telemetry timer forever, even
+-- though the command ACK and the #3 agent heartbeat continued working.
+-- Keep telemetry, command reception and serial command execution independent.
+-- The receiver must never sleep: emergency SCRAMs must still be queued while
+-- a START/STOP pulse is being handled by the command worker.
+local WORK_WAKE = "ty_mek_control_v1:work"
+local MAX_COMMAND_QUEUE = 16
+local commandQueue = {}
+
+local function rejectQueued(sender,packet,reason)
+    rednet.send(sender,{
+        requestId=packet.requestId,success=false,
+        message=reason,atUtcMs=os.epoch("utc"),
+    },REPLY)
+end
+
+local function receiveCommands()
+    while true do
+        local _,sender,packet,protocol = os.pullEvent("rednet_message")
+        if protocol==COMMAND and sender==CFG.trusted_base_id
+            and type(packet)=="table" and type(packet.action)=="string"
+            and type(packet.requestId)=="number"
+            and type(packet.issuedUtcMs)=="number" then
+            local age=os.epoch("utc")-packet.issuedUtcMs
+            if age>=-2000 and age<=5000 then
+                if packet.action=="scram" then
+                    -- An emergency stop supersedes any waiting START/BURN/
+                    -- mode edits; do not execute a queued START after SCRAM.
+                    for i=#commandQueue,1,-1 do
+                        if commandQueue[i].packet.action~="scram" then
+                            local cancelled=table.remove(commandQueue,i)
+                            rejectQueued(cancelled.sender,cancelled.packet,
+                                "Cancelled by priority SCRAM")
+                        end
+                    end
+                end
+                if #commandQueue<MAX_COMMAND_QUEUE then
+                    local work={sender=sender,packet=packet}
+                    if packet.action=="scram" then
+                        table.insert(commandQueue,1,work)
+                    else
+                        commandQueue[#commandQueue+1]=work
+                    end
+                    os.queueEvent(WORK_WAKE)
+                else
+                    rejectQueued(sender,packet,"Plant command queue full; NOT executed")
+                end
+            end
+        end
     end
 end
+
+local function executeCommands()
+    while true do
+        if #commandQueue==0 then os.pullEvent(WORK_WAKE) end
+        while #commandQueue>0 do
+            local work=table.remove(commandQueue,1)
+            processCommand(work.sender,work.packet)
+        end
+    end
+end
+
+local function publishTelemetry()
+    while true do
+        rednet.broadcast(status(),TELEMETRY)
+        sleep(CFG.sample_seconds)
+    end
+end
+
+print("Telemetry independent of START/STOP command waits.")
+parallel.waitForAll(publishTelemetry,receiveCommands,executeCommands)
