@@ -13,6 +13,12 @@ local CFG = {
     allow_remote_activate = false,
     allow_remote_logic_mode = false,
     allow_remote_turbine_mode = false,
+    -- Hardware START/STOP integration: OFF until the physical fault latch,
+    -- run-request latch and manual reset have been verified together.
+    relay_control_enabled = false,
+    relay_start_side = "left", -- user-assigned START request, never direct ACTIVATION
+    relay_stop_side = "back", -- user-assigned STOP / clear run request
+    relay_pulse_seconds = 0.25,
 }
 
 local TELEMETRY = "ty_mek_control_v1:data"
@@ -146,7 +152,7 @@ local function status()
             controllerIds={ CFG.trusted_base_id },
             burnRateCap=CFG.max_allowed_burn_rate,
             scram=CFG.allow_remote_scram,
-            activate=CFG.allow_remote_activate,
+            activate=CFG.allow_remote_activate and CFG.relay_control_enabled,
             logicMode=CFG.allow_remote_logic_mode,
             turbineMode=CFG.allow_remote_turbine_mode,
         },
@@ -164,6 +170,77 @@ local function safeNumber(n)
         and n ~= math.huge and n ~= -math.huge
 end
 
+-- A separate wired CC:Tweaked Redstone Relay drives the physical
+-- run-request SET/RESET inputs. NEVER connect its START directly to the
+-- reactor's ACTIVATION adapter; the independent hardware fault latch must
+-- remove the activation permit and clear the run request on any trip.
+local function relayForControl()
+    if not CFG.relay_control_enabled then
+        return nil,"Hardware relay control not commissioned"
+    end
+    if CFG.relay_start_side==CFG.relay_stop_side then
+        return nil,"START and STOP cannot share the same relay side"
+    end
+    local valid={top=true,bottom=true,left=true,right=true,front=true,back=true}
+    if not valid[CFG.relay_start_side] or not valid[CFG.relay_stop_side] then
+        return nil,"Invalid relay START/STOP side"
+    end
+    if type(CFG.relay_pulse_seconds)~="number"
+        or CFG.relay_pulse_seconds<0.15
+        or CFG.relay_pulse_seconds>1 then
+        return nil,"Invalid relay pulse duration"
+    end
+    local names={}
+    for _,name in ipairs(peripheral.getNames()) do
+        if peripheral.hasType(name,"redstone_relay") then
+            names[#names+1]=name
+        end
+    end
+    if #names~=1 then
+        return nil,"Expected exactly one Redstone Relay, found "..#names
+    end
+    local relay=peripheral.wrap(names[1])
+    if not relay or type(relay.getInput)~="function"
+        or type(relay.getOutput)~="function"
+        or type(relay.setOutput)~="function" then
+        return nil,"Redstone Relay API unavailable"
+    end
+    return relay
+end
+
+local function pulseRelay(side)
+    local relay,why=relayForControl()
+    if not relay then return false,why end
+    -- A manually powered marker wire or an already-ON output must never
+    -- be mistaken for a clean, exclusive control channel.
+    local okInput,external=pcall(relay.getInput,side)
+    local okOutput,out=pcall(relay.getOutput,side)
+    if not okInput or not okOutput then
+        return false,"Cannot read Relay "..side.." before pulse"
+    end
+    if external~=false or out~=false then
+        return false,"Relay "..side.." not idle / external power present"
+    end
+    local okOn,errOn=pcall(relay.setOutput,side,true)
+    if not okOn then return false,"Relay "..side.." ON failed: "..tostring(errOn) end
+    -- Try to drop the line even if the pulse wait errors. A computer crash,
+    -- relay disconnection or chunk unload is NOT covered by software cleanup:
+    -- the independent hardware interlock remains mandatory.
+    local waitOK,waitErr=pcall(sleep,CFG.relay_pulse_seconds)
+    local offOK,offErr=pcall(relay.setOutput,side,false)
+    if not offOK then
+        return false,"Relay "..side.." OFF FAILED: "..tostring(offErr)
+    end
+    local readOK,stillOn=pcall(relay.getOutput,side)
+    if not readOK or stillOn~=false then
+        return false,"Relay "..side.." OFF state not confirmed"
+    end
+    if not waitOK then
+        return false,"Relay "..side.." pulse interrupted: "..tostring(waitErr)
+    end
+    return true
+end
+
 local function commandResult(request)
     if type(request.action) ~= "string" then return false, "Invalid action" end
     local action, value = request.action, request.value
@@ -174,12 +251,34 @@ local function commandResult(request)
     end
 
     local method, readback, wanted
+    local stopPulseOK,stopPulseError=true,nil
     if action == "scram" then
         if not CFG.allow_remote_scram then return false, "Remote SCRAM locked at plant" end
+        -- Clear the hardware run request FIRST. Even if the relay cannot be
+        -- reached, still issue a direct SCRAM as an emergency fallback.
+        if CFG.relay_control_enabled then
+            stopPulseOK,stopPulseError=pulseRelay(CFG.relay_stop_side)
+        end
         method, readback, wanted = "scram", "getStatus", false
     elseif action == "activate" then
         if not CFG.allow_remote_activate then return false, "Remote activation locked at plant" end
-        method, readback, wanted = "activate", "getStatus", true
+        if not CFG.relay_control_enabled then
+            return false,"Remote START locked: hardware relay not commissioned"
+        end
+        if read(target,"getStatus")~=false then
+            return false,"Reactor is not confirmed STOPPED"
+        end
+        -- Deliberately NEVER call Mekanism activate() directly. The START
+        -- pulse goes only to the physical run-request latch; the fault latch
+        -- and ACTIVATION adapter decide whether the reactor may run.
+        local sent,why=pulseRelay(CFG.relay_start_side)
+        if not sent then return false,"Hardware START not issued: "..tostring(why) end
+        sleep(0.15)
+        local observed=read(target,"getStatus")
+        if observed~=true then
+            return false,"START pulse sent but reactor not running; check interlock, do NOT blindly retry"
+        end
+        return true,"Confirmed hardware START / reactor RUNNING"
     elseif action == "setBurnRate" then
         if not safeNumber(CFG.max_allowed_burn_rate) or CFG.max_allowed_burn_rate <= 0 then
             return false, "Set plant max_allowed_burn_rate before remote burn control"
@@ -229,6 +328,10 @@ local function commandResult(request)
     if not confirmed then
         return false, "Call returned but readback did not match (actual=" .. tostring(actual) .. ")"
     end
+    if action=="scram" and not stopPulseOK then
+        return false,"Reactor SCRAM confirmed but hardware RUN latch NOT confirmed clear: "..
+            tostring(stopPulseError)
+    end
     return true, "Confirmed " .. action .. " = " .. tostring(actual)
 end
 
@@ -265,6 +368,17 @@ openModems()
 print("TY Mekanism plant computer #" .. os.getComputerID())
 print("Authorized reactor control sender: BASE #" .. tostring(CFG.trusted_base_id))
 print("Pocket #6 is telemetry/admin-only; base panel must be unlocked separately.")
+print("Relay START/STOP mode: "..(CFG.relay_control_enabled and "ENABLED" or "LOCKED"))
+if CFG.relay_control_enabled then
+    -- Never leave a previous program's Relay outputs active after startup.
+    -- On failure this service aborts, rather than offering remote START.
+    local relay,err=relayForControl()
+    assert(relay, "Relay startup check: "..tostring(err))
+    assert(pcall(relay.setOutput,CFG.relay_start_side,false),
+        "Unable to deassert START on program startup")
+    assert(pcall(relay.setOutput,CFG.relay_stop_side,false),
+        "Unable to deassert STOP on program startup")
+end
 print("Sensors: " .. tostring(findReactor()) .. " / " .. tostring(findTurbine()))
 print("Use independent Mekanism/redstone reactor safety protection.")
 local timer = os.startTimer(0)
