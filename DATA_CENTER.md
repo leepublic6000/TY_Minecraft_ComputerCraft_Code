@@ -194,6 +194,16 @@ pdc> panel 4       # 預期 LOCKED
 
 **網路風險：** Rednet 身分來自電腦 ID 和 #0 的現有登入 token，並無端對端加密或可靠的防偽來源驗證。只適合單人/完全可信任的私人世界。實機需驗證未登入、viewer、#4 離線、心跳中斷、授權到期/重啟與二次確認清除等情境，未經 ATM10 8.3 現場測試不應宣稱安全或完整驗收。
 
+## 2026-10-27 遙測 STALE／START 成功後資料停止更新修正
+
+**實際現象**：基地 #4 的 ACTIVATE 顯示已確認硬體 START，#3 本機證實反應爐曾 RUNNING；基地遙測卻停留在 STALE/OFFLINE。Pocket #6 `info 3` 同時仍回報 #3 `ONLINE / RUNNING`（這是管理代理服務心跳，不代表 `mek_send.lua` 還在正常廣播）。使用者已於 #3 本機證實反應爐重新 STOPPED。
+
+**已確認的程式缺陷**：舊版 `mek_send.lua` 將 `rednet_message` 控制處理與定時遙測放在同一個 `os.pullEvent()` 迴圈；ACTIVATE 的 `pulseRelay()` 和讀回確認含 `sleep()`，CC:Tweaked `sleep()` 會丟棄當前 coroutine 收到的其他事件。如果在此期間遙測的計時器觸發，事件遭丟棄後便不再重新排程；來自基地的 STOP 亦有機會被丟棄。官方說明：[CC:Tweaked sleep](https://tweaked.cc/module/_G.html)、[parallel](https://tweaked.cc/module/parallel.html)。
+
+**GitHub 修正**（commit `2f523f7562f64a5c909a01c72911ee2c1a237ee4`）：將遙測廣播、控制命令接收、單一串列控制執行分為 `parallel.waitForAll` 的三個獨立 coroutine，接收命令不會 sleep；有界佇列允許優先 SCRAM，SCRAM 取消尚未執行的 START/BURN/模式修改。補上硬體 STOP 脈衝已成功令反應爐停止時的 `scram()` 「already inactive」狀態判定。保留目前安全聯鎖、唯一授權基地 #4、`left` START／`back` STOP；GitHub 的遠端開關仍**預設鎖定**。
+
+**現階段部署**：維持反應爐 STOPPED、硬體 RUN REQUEST OFF → 本機保存 `mek_send.lua` 的 CFG 權限設定 → `ty.lua update mek_send.lua`（依更新器指示確認取代；更新覆蓋本機 CFG）→ 保持遠端 ACTIVATE 關閉，先核對設定 → 平板管理員 `restart 3` 載入新版 → 檢查 `Service: RUNNING`、基地遙測從 STALE 恢復 LIVE。此為軟體修正，**未實機驗證 START 後遙測恢復**；在無獨立低冷卻液保護、同一水管供水的現況下，不得把它視為無人值守核電廠的安全保證。
+
 ## Relay START／STOP 與現有安全聯鎖整合（2026-10-27）
 
 已按使用者在 Computer #3 **實機讀到**的 Relay 側面制定固定映射：`left` 為 START（送往獨立的運轉請求鎖存器 SET），`back` 為 STOP（送往運轉請求鎖存器清除／RESET）。兩端臨時標記電源已移除後的唯讀結果均為 `getInput=false`、`getOutput=false`；**這不等於已驗證真正的輸出線能觸發硬體鎖存器**。
