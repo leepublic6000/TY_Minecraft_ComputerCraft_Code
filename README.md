@@ -88,6 +88,8 @@ allow_remote_logic_mode = false,
 allow_remote_turbine_mode = false,
 ```
 
+**最新遠端 START 保護：** `mek_send.lua` 新增預設關閉的 `relay_control_enabled=false`，已指定 CC:Tweaked Redstone Relay 的 `left` 為 START、`back` 為 STOP。基地透過 `ACTIVATE` 的請求不再直接呼叫 Mekanism `activate()`；只有實際核對物理故障鎖存與運轉請求鎖存，並在安全停機維護時**另外啟用** `relay_control_enabled` 和既有 `allow_remote_activate` 才會嘗試發出 Relay START 脈衝。遠端 SCRAM 仍有直接 API 停機備援。僅僅更新 GitHub 不會自動打開紅石控制；詳見 [Relay 安全整合說明](DATA_CENTER.md#relay-startstop-與現有安全聯鎖整合2026-10-27)。
+
 要開放哪一種手動操作，必須由你在核電廠 #3 的 `mek_send.lua` 中**逐項明確開啟**，並重啟該程式：
 
 - `allow_remote_scram = true`：只允許基地 #4 發出 SCRAM 停機指令；基地紅色按鈕點一次，Pocket #6 不再直接操作反應爐。
