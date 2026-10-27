@@ -309,7 +309,7 @@ local function commandResult(request)
         return false, "Method unavailable: " .. method
     end
     local ok, err
-    if action == "scram" or action == "activate" then
+    if action == "scram" then
         ok, err = pcall(peripheral.call, target, method)
     else
         ok, err = pcall(peripheral.call, target, method, wanted)
