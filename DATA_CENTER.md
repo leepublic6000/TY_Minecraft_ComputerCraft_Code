@@ -194,6 +194,21 @@ pdc> panel 4       # 預期 LOCKED
 
 **網路風險：** Rednet 身分來自電腦 ID 和 #0 的現有登入 token，並無端對端加密或可靠的防偽來源驗證。只適合單人/完全可信任的私人世界。實機需驗證未登入、viewer、#4 離線、心跳中斷、授權到期/重啟與二次確認清除等情境，未經 ATM10 8.3 現場測試不應宣稱安全或完整驗收。
 
+## Relay START／STOP 與現有安全聯鎖整合（2026-10-27）
+
+已按使用者在 Computer #3 **實機讀到**的 Relay 側面制定固定映射：`left` 為 START（送往獨立的運轉請求鎖存器 SET），`back` 為 STOP（送往運轉請求鎖存器清除／RESET）。兩端臨時標記電源已移除後的唯讀結果均為 `getInput=false`、`getOutput=false`；**這不等於已驗證真正的輸出線能觸發硬體鎖存器**。
+
+`mek_send.lua` 新增：
+- `relay_control_enabled=false`：預設不對任何 Relay 發出控制脈衝，亦拒絕遠端 START；在完成電氣隔離、故障優先權與人工復歸驗收後，才能明確改為 `true`。其他原有權限 `allow_remote_activate`、`allow_remote_scram` 與燃燒率安全上限仍**分開**控制。
+- `relay_start_side="left"`、`relay_stop_side="back"`、`relay_pulse_seconds=0.25`（秒）：程式先確認只有**一個**可用的 CC:Tweaked `redstone_relay`、目標側輸入／輸出均為 OFF，才發出有限時間脈衝並嘗試立即恢復 OFF；未確認輸出恢復 OFF 則回報錯誤。
+- 遠端 `activate` 從此**不直接執行 Mekanism `activate()`**。只有 `allow_remote_activate=true` 且 `relay_control_enabled=true` 時，才向 START 送脈衝，並用反應爐 `getStatus` 讀回確認結果；硬體未允許時拒絕或回報未啟動，**不會自動重試**。
+- 遠端 `scram` 保留**直接 Mekanism `scram()` 備援**；若 Relay 控制啟用，會先嘗試 STOP 脈衝以清除硬體運轉請求。即使 STOP Relay 失敗，仍嘗試直接 SCRAM，並明確標示「硬體 RUN 鎖存未確認清除」。
+- 一律不改動設備監控廣播、Pocket #6 管理員授權、基地 #4 操控室 UI 或高風險權限預設。安全預設仍 `max_allowed_burn_rate=nil`、`allow_remote_activate=false`、`allow_remote_logic_mode=false`。
+
+**現階段尚未准許啟動**：必須確認 START/STOP 的實體終點分別是運轉請求鎖存的 SET/RESET；硬體故障鎖存能在 Relay START 卡住、電腦/網路離線時**獨立**切斷 `ACTIVATION` 並清除運轉請求；故障解除後人工 RESET 不能自動開堆；`ACTIVATION` 不得由 RESET 線直接供電。此一實體聯鎖目前無法由純程式碼證明。**原生 Mekanism GUI/API 仍可能繞過某些紅石邏輯；這個變更只強制基地遠端 START 不再直接呼叫 API，不代表硬體全域不可繞過。** 冷卻液不足的獨立保護、蒸氣/回水/供電限制仍需保留。
+
+**安全部署順序**：保持反應爐安全 STOPPED 與基地 P:LOCK → 在 #3 本機核對並保留目前 `mek_send.lua` 的自訂 CFG／備份 → `ty.lua update mek_send.lua`（由官方更新器檢查停堆，必要時輸入 `REPLACE` 與 `YES`；僅取回 GitHub 安全預設）→ 查看新檔的 `relay_control_enabled=false` 與兩個側面 → **不要現在設為 true** → 於安全停機狀態只重新載入受管理的 `mek_send.lua`，不開第二份程式。更新不代表真正的硬體輸出驗收。等電路實際安全條件確認後，再明確調整上述權限，不能跳過獨立安全保護。
+
 ## 下一階段：核電廠 #3 基地專屬控制指令
 
 已提交 GitHub：
